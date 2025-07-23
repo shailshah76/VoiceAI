@@ -24,7 +24,14 @@ app.get('/api/health', (req, res) => {
 // Serve /uploads from the local uploads directory when running from backend/
 const uploadsPath = path.join(process.cwd(), 'uploads');
 console.log('Serving /uploads from:', uploadsPath);
-app.use('/uploads', express.static(uploadsPath));
+
+// Add CORS headers for static files to ensure react-pdf can fetch them
+app.use('/uploads', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+}, express.static(uploadsPath));
 
 // API routes
 app.use('/api/upload', uploadRouter);

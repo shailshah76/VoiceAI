@@ -29,6 +29,72 @@ function convertPPTXtoPDF(pptxPath) {
   });
 }
 
+// Helper to convert PDF pages to images using pdftoppm directly
+function convertPDFToImages(pdfPath) {
+  return new Promise((resolve, reject) => {
+    const outputDir = path.dirname(pdfPath);
+    const pdfBaseName = path.basename(pdfPath, '.pdf');
+    
+    console.log('Converting PDF to images:', pdfPath);
+    console.log('Output directory:', outputDir);
+    
+    // Use pdftoppm directly - more reliable than pdf-poppler
+    const cmd = `pdftoppm -jpeg -r 150 "${pdfPath}" "${outputDir}/${pdfBaseName}-page"`;
+    console.log('Running pdftoppm command:', cmd);
+    
+    exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('pdftoppm error:', error);
+        // Fallback: return the original PDF as a single slide
+        resolve([{
+          pageNumber: 1,
+          imagePath: `/uploads/${path.basename(pdfPath)}`
+        }]);
+        return;
+      }
+      
+      console.log('pdftoppm completed successfully');
+      
+      // Find generated image files
+      try {
+        const files = fs.readdirSync(outputDir);
+        const imageFiles = files.filter(f => f.startsWith(`${pdfBaseName}-page`) && f.endsWith('.jpg'));
+        
+        if (imageFiles.length === 0) {
+          console.log('No image files generated, using PDF fallback');
+          resolve([{
+            pageNumber: 1,
+            imagePath: `/uploads/${path.basename(pdfPath)}`
+          }]);
+          return;
+        }
+        
+        // Sort by page number
+        imageFiles.sort((a, b) => {
+          const aNum = parseInt(a.match(/-(\d+)\.jpg$/)?.[1] || '1');
+          const bNum = parseInt(b.match(/-(\d+)\.jpg$/)?.[1] || '1');
+          return aNum - bNum;
+        });
+        
+        console.log('Generated image files:', imageFiles);
+        
+        const pages = imageFiles.map((file, index) => ({
+          pageNumber: index + 1,
+          imagePath: `/uploads/${file}`
+        }));
+        
+        resolve(pages);
+      } catch (err) {
+        console.error('Error reading generated files:', err);
+        resolve([{
+          pageNumber: 1,
+          imagePath: `/uploads/${path.basename(pdfPath)}`
+        }]);
+      }
+    });
+  });
+}
+
 // POST /api/slides/process
 // Expects: { files: ["/uploads/filename1", ...] }
 router.post('/process', async (req, res) => {
@@ -44,13 +110,19 @@ router.post('/process', async (req, res) => {
       if (file.endsWith('.pptx') || file.endsWith('.ppt')) {
         // Convert PPTX to PDF
         const pdfPath = await convertPPTXtoPDF(absPath);
-        // Return the PDF URL for preview (replace .pptx/.ppt with .pdf in the original file path)
-        const pdfUrl = file.replace(/\.(pptx|ppt)$/i, '.pdf');
-        slides.push({
-          id: slides.length + 1,
-          pdf: pdfUrl,
-          title: path.basename(pdfPath),
-          text: 'PDF preview of uploaded PPTX'
+        // Convert PDF pages to images
+        const pageImages = await convertPDFToImages(pdfPath);
+        
+        // Create a slide for each page
+        pageImages.forEach((page, index) => {
+          slides.push({
+            id: slides.length + 1,
+            image: page.imagePath,
+            title: `Slide ${index + 1}`,
+            text: `Page ${page.pageNumber} of presentation`,
+            pageNumber: page.pageNumber,
+            totalPages: pageImages.length
+          });
         });
       } else {
         // For other files, just show as image/text

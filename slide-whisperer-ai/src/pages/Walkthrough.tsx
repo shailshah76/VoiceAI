@@ -108,21 +108,11 @@ const Walkthrough = () => {
         {/* Main slide area */}
         <Card className="mb-8 overflow-hidden shadow-soft">
           <div className="aspect-video relative bg-gradient-card">
-            {slide.pdf ? (
-              <iframe
-                src={slide.pdf && slide.pdf.startsWith('/uploads/') ? API_BASE + slide.pdf : slide.pdf}
-                title={slide.title}
-                className="w-full h-full"
-                style={{ minHeight: 400 }}
-                frameBorder="0"
-              />
-            ) : (
-              <img 
-                src={slide.image && typeof slide.image === 'string' && slide.image.startsWith('/uploads/') ? (API_BASE + slide.image) : slide.image} 
-                alt={slide.title}
-                className="w-full h-full object-cover"
-              />
-            )}
+            <img 
+              src={slide.image && typeof slide.image === 'string' && slide.image.startsWith('/uploads/') ? (API_BASE + slide.image) : slide.image} 
+              alt={slide.title}
+              className="w-full h-full object-cover"
+            />
             {isNarrating && (
               <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                 <div className="bg-white/90 rounded-lg p-4 flex items-center space-x-3">
