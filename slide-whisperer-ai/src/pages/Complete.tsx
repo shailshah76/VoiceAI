@@ -7,6 +7,10 @@ import { useState } from "react";
 const Complete = () => {
   const navigate = useNavigate();
   const [rating, setRating] = useState(0);
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState("");
+
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:7122';
 
   const handleStartAgain = () => {
     navigate("/upload");
@@ -16,8 +20,43 @@ const Complete = () => {
     navigate("/upload");
   };
 
-  const handleHome = () => {
-    navigate("/");
+  const handleHome = async () => {
+    setIsCleaningUp(true);
+    setCleanupMessage("");
+
+    try {
+      console.log('🧹 Starting cleanup before going home...');
+      const response = await fetch(`${API_BASE}/api/cleanup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cleanup failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('🧹 Cleanup result:', result);
+      
+      setCleanupMessage(`✅ Cleanup completed! ${result.filesDeleted} files deleted.`);
+      
+      // Navigate to home after a short delay
+      setTimeout(() => {
+        navigate("/");
+      }, 1500);
+
+    } catch (error) {
+      console.error('❌ Cleanup failed:', error);
+      setCleanupMessage(`❌ Cleanup failed: ${error.message}`);
+      // Still navigate home even if cleanup fails
+      setTimeout(() => {
+        navigate("/");
+      }, 2000);
+    } finally {
+      setIsCleaningUp(false);
+    }
   };
 
   return (
@@ -88,6 +127,15 @@ const Complete = () => {
           )}
         </Card>
 
+        {/* Cleanup message */}
+        {cleanupMessage && (
+          <Card className="mb-6 p-4 text-center">
+            <p className={`font-medium ${cleanupMessage.includes('✅') ? 'text-success' : 'text-destructive'}`}>
+              {cleanupMessage}
+            </p>
+          </Card>
+        )}
+
         {/* Action buttons */}
         <div className="flex flex-col space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -96,6 +144,7 @@ const Complete = () => {
               size="xl"
               onClick={handleStartAgain}
               className="flex items-center justify-center"
+              disabled={isCleaningUp}
             >
               <RefreshCw className="w-5 h-5 mr-2" />
               Start Again
@@ -106,6 +155,7 @@ const Complete = () => {
               size="xl"
               onClick={handleNewSlides}
               className="flex items-center justify-center"
+              disabled={isCleaningUp}
             >
               <Upload className="w-5 h-5 mr-2" />
               Upload New Slides
@@ -117,8 +167,16 @@ const Complete = () => {
               variant="ghost" 
               onClick={handleHome}
               className="text-muted-foreground hover:text-foreground"
+              disabled={isCleaningUp}
             >
-              ← Back to Home
+              {isCleaningUp ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Cleaning up & going home...
+                </>
+              ) : (
+                "← Back to Home"
+              )}
             </Button>
           </div>
         </div>

@@ -34,6 +34,19 @@ class TextToSpeechService {
 
     console.log('Converting text to speech:', text.substring(0, 50) + '...');
 
+    // Ensure audio directory exists before saving
+    if (!fs.existsSync(this.outputDir)) {
+      console.log('Creating audio directory:', this.outputDir);
+      fs.mkdirSync(this.outputDir, { recursive: true });
+    }
+    
+    // Also ensure the output directory for the specific file exists
+    const outputDir = path.dirname(outputPath);
+    if (!fs.existsSync(outputDir)) {
+      console.log('Creating output directory:', outputDir);
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
     if (!outputPath) {
       outputPath = path.join(this.outputDir, `tts-${Date.now()}.mp3`);
     }

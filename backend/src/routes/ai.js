@@ -2,8 +2,55 @@ import express from 'express';
 import textToSpeechService from '../services/textToSpeech.js';
 import imageAnalysisService from '../services/imageAnalysis.js';
 import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
+
+// POST /api/cleanup - Delete all files in uploads folder
+router.post('/cleanup', async (req, res) => {
+  try {
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    
+    if (!fs.existsSync(uploadsDir)) {
+      return res.json({ message: 'Uploads directory does not exist', filesDeleted: 0 });
+    }
+
+    // Get all files and subdirectories in uploads
+    const items = fs.readdirSync(uploadsDir);
+    let deletedCount = 0;
+
+    for (const item of items) {
+      const itemPath = path.join(uploadsDir, item);
+      const stat = fs.statSync(itemPath);
+
+      if (stat.isDirectory()) {
+        // Recursively delete directory and its contents
+        fs.rmSync(itemPath, { recursive: true, force: true });
+        deletedCount++;
+        console.log(`Deleted directory: ${item}`);
+      } else if (stat.isFile()) {
+        // Delete file
+        fs.unlinkSync(itemPath);
+        deletedCount++;
+        console.log(`Deleted file: ${item}`);
+      }
+    }
+
+    console.log(`🧹 Cleanup completed: ${deletedCount} items deleted from uploads folder`);
+    res.json({ 
+      message: 'Cleanup completed successfully', 
+      filesDeleted: deletedCount,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Cleanup failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to cleanup uploads folder', 
+      details: error.message 
+    });
+  }
+});
 
 
 
