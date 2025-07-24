@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,6 +33,9 @@ const Walkthrough = () => {
   const [isListening, setIsListening] = useState(false);
   const [isNarrating, setIsNarrating] = useState(false);
   const [userQuestion, setUserQuestion] = useState("");
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [narrationText, setNarrationText] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const slide = slides[currentSlide];
 
@@ -41,12 +44,84 @@ const Walkthrough = () => {
     startNarration();
   }, [currentSlide]);
 
-  const startNarration = () => {
+  const startNarration = async () => {
     setIsNarrating(true);
-    // Simulate narration duration
-    setTimeout(() => {
+    setAudioUrl(null);
+    setNarrationText("");
+    
+    try {
+      console.log('Requesting narration for slide:', slide);
+      const response = await fetch(`${API_BASE}/api/narrate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          slide: {
+            id: slide.id,
+            title: slide.title,
+            text: slide.text || slide.narration || `This is slide ${currentSlide + 1}`
+          }
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Narration response:', data);
+        setNarrationText(data.narration);
+        
+        if (data.audioUrl) {
+          const fullAudioUrl = `${API_BASE}${data.audioUrl}`;
+          setAudioUrl(fullAudioUrl);
+          
+          // Create and play audio
+          if (audioRef.current) {
+            audioRef.current.pause();
+          }
+          
+          const audio = new Audio(fullAudioUrl);
+          audioRef.current = audio;
+          
+          audio.onloadeddata = () => {
+            console.log('Audio loaded, playing...');
+            audio.play().catch(err => {
+              console.error('Failed to play audio:', err);
+              setIsNarrating(false);
+            });
+          };
+          
+          audio.oncanplaythrough = () => {
+            console.log('Audio can play through, attempting to play...');
+            // Try to play, but if it fails due to autoplay policy, that's ok
+            audio.play().catch(err => {
+              console.warn('Autoplay blocked by browser policy. User interaction needed:', err);
+              // Don't set isNarrating to false here - let user manually play
+            });
+          };
+          
+          audio.onended = () => {
+            console.log('Audio finished playing');
+            setIsNarrating(false);
+          };
+          
+          audio.onerror = (err) => {
+            console.error('Audio error:', err);
+            setIsNarrating(false);
+          };
+        } else {
+          // No audio available, just show text
+          setTimeout(() => {
+            setIsNarrating(false);
+          }, 3000);
+        }
+      } else {
+        console.error('Failed to get narration:', response.statusText);
+        setIsNarrating(false);
+      }
+    } catch (error) {
+      console.error('Error requesting narration:', error);
       setIsNarrating(false);
-    }, 3000);
+    }
   };
 
   const toggleListening = () => {
@@ -115,9 +190,17 @@ const Walkthrough = () => {
             />
             {isNarrating && (
               <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                <div className="bg-white/90 rounded-lg p-4 flex items-center space-x-3">
+                <div className="bg-white/90 rounded-lg p-4 flex items-center space-x-3 max-w-md">
                   <Volume2 className="w-5 h-5 text-primary animate-pulse" />
-                  <span className="text-sm font-medium">Narrating...</span>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">Narrating...</div>
+                    {narrationText && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {narrationText.substring(0, 100)}...
+                      </div>
+                    )}
+
+                  </div>
                 </div>
               </div>
             )}
