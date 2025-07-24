@@ -39,28 +39,22 @@ class ImageAnalysisService {
       // Try Gemini vision directly first
       if (this.genAI) {
         try {
-          console.log('🔍 Using Gemini 2.5 Pro vision for slide narration...');
-          console.log('📊 Slide info:', JSON.stringify(slideInfo, null, 2));
+          console.log('Using Gemini 2.5 Pro vision for slide narration...');
           
           // Check if image file exists
           const imagePath = path.join(process.cwd(), slideInfo.image);
-          console.log('🖼️ Checking image at path:', imagePath);
           
           if (!fs.existsSync(imagePath)) {
             throw new Error(`Image file not found: ${imagePath}`);
           }
           
-          console.log('✅ Image file exists, proceeding with Gemini...');
           const narration = await this.generateWithGeminiVision(slideInfo);
-          console.log('✅ Gemini narration generated successfully:', narration);
+          console.log('Gemini narration generated successfully');
           return narration;
         } catch (error) {
-          console.error('❌ Gemini vision failed:', error.message);
-          console.error('❌ Full Gemini error:', error);
+          console.error('Gemini vision failed:', error.message);
         }
-      } else {
-        console.log('⚠️ Gemini client not available');
-      }
+              }
       
       // Fallback: Step 1: Analyze the image to get visual description
       const imageDescription = await this.analyzeImage(imagePath);
@@ -311,26 +305,22 @@ Your response must contain only the generated script. Do not include any introdu
 
 Context: This is slide ${pageNumber || 1} of ${totalPages || 1} in the presentation.`;
 
-    try {
-      console.log('🤖 Getting Gemini model: gemini-2.0-flash-exp');
-      // Get the generative model
-      const model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+          try {
+        // Get the generative model
+        const model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-      console.log('🖼️ Preparing image data, size:', base64Image.length, 'characters');
-      // Prepare the image data
-      const imagePart = {
-        inlineData: {
-          data: base64Image,
-          mimeType: "image/jpeg"
-        }
-      };
+        // Prepare the image data
+        const imagePart = {
+          inlineData: {
+            data: base64Image,
+            mimeType: "image/jpeg"
+          }
+        };
 
-      console.log('📝 Sending request to Gemini with prompt length:', prompt.length);
-      // Generate content with both text and image
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      console.log('📨 Received response from Gemini');
-      let narration = response.text();
+        // Generate content with both text and image
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        let narration = response.text();
 
       // Clean up any unwanted formatting
       narration = narration.replace(/\*\*/g, ''); // Remove bold markdown
@@ -339,8 +329,7 @@ Context: This is slide ${pageNumber || 1} of ${totalPages || 1} in the presentat
       narration = narration.replace(/\s+/g, ' '); // Replace multiple spaces with single space
       narration = narration.trim();
 
-      console.log('Gemini 2.5 Pro generated narration:', narration);
-      return narration;
+              return narration;
 
     } catch (error) {
       console.error('Gemini SDK error:', error);

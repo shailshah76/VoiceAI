@@ -17,7 +17,6 @@ const Complete = () => {
     setCleanupMessage("");
 
     try {
-      console.log('🧹 Starting cleanup before starting again...');
       const response = await fetch(`${API_BASE}/api/cleanup`, {
         method: 'POST',
         headers: {
@@ -56,7 +55,6 @@ const Complete = () => {
     setCleanupMessage("");
 
     try {
-      console.log('🧹 Starting cleanup before uploading new slides...');
       const response = await fetch(`${API_BASE}/api/cleanup`, {
         method: 'POST',
         headers: {
@@ -95,7 +93,6 @@ const Complete = () => {
     setCleanupMessage("");
 
     try {
-      console.log('🧹 Starting cleanup before going home...');
       const response = await fetch(`${API_BASE}/api/cleanup`, {
         method: 'POST',
         headers: {
