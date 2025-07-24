@@ -63,6 +63,18 @@ router.post('/narrate', async (req, res) => {
   }
   
   try {
+    // Check if audio was pre-generated during file processing
+    if (slide.preGeneratedAudio && slide.preGeneratedNarration) {
+      console.log('⚡ Using pre-generated audio for instant response');
+      return res.json({
+        narration: slide.preGeneratedNarration,
+        audioUrl: slide.preGeneratedAudio,
+        message: 'Pre-generated narration served instantly'
+      });
+    }
+    
+    // Fallback: Generate narration and audio on-demand (slower)
+    console.log('🐌 No pre-generated audio found, generating on-demand...');
     let narrationText = '';
     
     // If slide has an image path, analyze it for contextual narration
@@ -182,6 +194,118 @@ router.post('/tts', async (req, res) => {
     res.status(500).json({ 
       error: 'Text-to-speech conversion failed',
       details: error.message
+    });
+  }
+});
+
+// POST /api/pregenerate-audio
+// Expects: { slide: { title, text, image, pageNumber, totalPages, pptName } }
+router.post('/pregenerate-audio', async (req, res) => {
+  const { slide } = req.body;
+  if (!slide) {
+    return res.status(400).json({ error: 'No slide provided' });
+  }
+  
+  console.log(`🔄 Background pre-generating audio for slide ${slide.pageNumber}...`);
+  
+  try {
+    // Check if audio already exists in memory
+    if (slide.preGeneratedAudio) {
+      console.log(`⚡ Audio already exists for slide ${slide.pageNumber}`);
+      return res.json({
+        success: true,
+        audioUrl: slide.preGeneratedAudio,
+        narration: slide.preGeneratedNarration,
+        message: 'Audio already available'
+      });
+    }
+    
+    // Create deterministic filename based on PPT name and slide number
+    const pptName = slide.pptName || 'unknown';
+    const cleanPptName = pptName.replace(/[^a-zA-Z0-9]/g, '_');
+    const audioFilename = `slide-${cleanPptName}-${slide.pageNumber}`;
+    
+    // Check if audio file already exists on disk
+    const audioDir = path.join(process.cwd(), 'uploads', 'audio');
+    const existingAudioPath = path.join(audioDir, `${audioFilename}.wav`);
+    
+    if (fs.existsSync(existingAudioPath)) {
+      console.log(`⚡ Using existing cached audio for slide ${slide.pageNumber}: ${audioFilename}.wav`);
+      const audioUrl = `/uploads/audio/${audioFilename}.wav`;
+      
+      // Try to read existing narration from cache file
+      const narrationCacheFile = path.join(audioDir, `${audioFilename}.txt`);
+      let narration = slide.text || `Slide ${slide.pageNumber}`;
+      
+      if (fs.existsSync(narrationCacheFile)) {
+        try {
+          narration = fs.readFileSync(narrationCacheFile, 'utf-8');
+          console.log(`📄 Using cached narration for slide ${slide.pageNumber}`);
+        } catch (err) {
+          console.warn(`⚠️ Could not read cached narration: ${err.message}`);
+        }
+      }
+      
+      return res.json({
+        success: true,
+        audioUrl: audioUrl,
+        narration: narration,
+        message: `Cached audio served for slide ${slide.pageNumber}`
+      });
+    }
+    
+    // Generate narration text (only if not cached)
+    let narrationText = '';
+    if (slide.image && slide.image.startsWith('/uploads/')) {
+      const imagePath = path.join(process.cwd(), slide.image);
+      console.log(`🧠 Analyzing slide ${slide.pageNumber} image:`, imagePath);
+      
+      const slideInfo = {
+        title: slide.title,
+        text: slide.text,
+        image: slide.image,
+        pageNumber: slide.pageNumber,
+        totalPages: slide.totalPages
+      };
+      
+      narrationText = await imageAnalysisService.generateSlideNarration(imagePath, slideInfo);
+    } else {
+      narrationText = slide.text || slide.title || 'This slide contains important presentation content.';
+    }
+    
+    console.log(`🎤 Generating TTS for slide ${slide.pageNumber} with filename: ${audioFilename}`);
+    
+    // Generate TTS audio with deterministic filename
+    const audioUrl = await textToSpeechService.textToSpeechFile(narrationText, audioFilename);
+    
+    // Cache the narration text alongside the audio
+    const narrationCacheFile = path.join(audioDir, `${audioFilename}.txt`);
+    try {
+      // Ensure audio directory exists
+      if (!fs.existsSync(audioDir)) {
+        fs.mkdirSync(audioDir, { recursive: true });
+      }
+      fs.writeFileSync(narrationCacheFile, narrationText, 'utf-8');
+      console.log(`💾 Cached narration text for slide ${slide.pageNumber}`);
+    } catch (err) {
+      console.warn(`⚠️ Could not cache narration text: ${err.message}`);
+    }
+    
+    console.log(`✅ Background audio generated for slide ${slide.pageNumber}: ${audioUrl}`);
+    
+    res.json({
+      success: true,
+      audioUrl: audioUrl,
+      narration: narrationText,
+      message: `Audio pre-generated for slide ${slide.pageNumber}`
+    });
+    
+  } catch (error) {
+    console.error(`❌ Background audio generation failed for slide ${slide.pageNumber}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: `Failed to generate audio for slide ${slide.pageNumber}`
     });
   }
 });

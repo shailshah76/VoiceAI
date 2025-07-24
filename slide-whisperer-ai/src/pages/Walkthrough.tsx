@@ -26,9 +26,12 @@ const API_BASE = "http://localhost:7122"; // Match backend port
 const Walkthrough = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const slides = (location.state && location.state.slides && Array.isArray(location.state.slides) && location.state.slides.length > 0)
+  const initialSlides = (location.state && location.state.slides && Array.isArray(location.state.slides) && location.state.slides.length > 0)
     ? location.state.slides
     : sampleSlides;
+  
+  // Use state to track slides with their audio status
+  const [slides, setSlides] = useState(initialSlides);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isListening, setIsListening] = useState(false);
   const [isNarrating, setIsNarrating] = useState(false);
@@ -39,18 +42,179 @@ const Walkthrough = () => {
 
   const slide = slides[currentSlide];
 
+  // Background audio generation for next slide  
+  const preGenerateNextSlideAudio = async (nextSlideIndex: number) => {
+    if (nextSlideIndex >= slides.length) return; // No next slide
+    
+    const nextSlide = slides[nextSlideIndex];
+    
+    // Skip if audio already exists or is being generated
+    if (nextSlide.preGeneratedAudio || nextSlide.audioStatus === 'generating') {
+      console.log(`⚡ Slide ${nextSlideIndex + 1} audio already available or generating`);
+      return;
+    }
+    
+    console.log(`🔄 Starting HIGH PRIORITY background generation for slide ${nextSlideIndex + 1}...`);
+    
+    // Mark as generating
+    setSlides(prevSlides => {
+      const newSlides = [...prevSlides];
+      newSlides[nextSlideIndex] = { ...newSlides[nextSlideIndex], audioStatus: 'generating' };
+      return newSlides;
+    });
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/pregenerate-audio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          slide: {
+            id: nextSlide.id,
+            title: nextSlide.title,
+            text: nextSlide.text || nextSlide.narration,
+            image: nextSlide.image,
+            pageNumber: nextSlideIndex + 1,
+            totalPages: slides.length,
+            pptName: nextSlide.pptName // Include PPT name for deterministic filenames
+          }
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ Background audio generated for slide ${nextSlideIndex + 1}`);
+        
+        // Update the slide with pre-generated audio
+        setSlides(prevSlides => {
+          const newSlides = [...prevSlides];
+          newSlides[nextSlideIndex] = {
+            ...newSlides[nextSlideIndex],
+            preGeneratedAudio: data.audioUrl,
+            preGeneratedNarration: data.narration,
+            audioStatus: 'ready'
+          };
+          return newSlides;
+        });
+      } else {
+        console.error(`❌ Failed to pre-generate audio for slide ${nextSlideIndex + 1}`);
+        setSlides(prevSlides => {
+          const newSlides = [...prevSlides];
+          newSlides[nextSlideIndex] = { ...newSlides[nextSlideIndex], audioStatus: 'failed' };
+          return newSlides;
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Error pre-generating audio for slide ${nextSlideIndex + 1}:`, error);
+      setSlides(prevSlides => {
+        const newSlides = [...prevSlides];
+        newSlides[nextSlideIndex] = { ...newSlides[nextSlideIndex], audioStatus: 'failed' };
+        return newSlides;
+      });
+    }
+  };
+
   useEffect(() => {
     // Auto-start narration when slide loads
     startNarration();
+    
+    // Pre-generate audio for next slide in background IMMEDIATELY
+    const nextSlideIndex = currentSlide + 1;
+    if (nextSlideIndex < slides.length) {
+      console.log(`🚀 Immediately starting background audio generation for slide ${nextSlideIndex + 1}`);
+      // Start immediately, don't wait
+      preGenerateNextSlideAudio(nextSlideIndex);
+      
+      // Also pre-generate the slide after next if we have time (lower priority)
+      const afterNextIndex = currentSlide + 2;
+      if (afterNextIndex < slides.length) {
+        setTimeout(() => {
+          console.log(`📋 Low priority: starting background generation for slide ${afterNextIndex + 1}`);
+          preGenerateNextSlideAudio(afterNextIndex);
+        }, 2000); // Give 2 seconds for the immediate next slide to start
+      }
+    }
+    
+    // Cleanup function
+    return () => {
+      console.log('🧹 Slide changing - stopping any playing audio');
+      // Stop audio when changing slides to prevent overlap
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    };
   }, [currentSlide]);
 
   const startNarration = async () => {
+    // Always stop any existing audio first to prevent overlap
+    if (audioRef.current) {
+      console.log('🛑 Stopping any existing audio to prevent overlap');
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    
     setIsNarrating(true);
     setAudioUrl(null);
     setNarrationText("");
     
+    // Check if this slide has pre-generated audio
+    if (slide.preGeneratedAudio && slide.preGeneratedNarration) {
+      console.log('⚡ Using pre-generated audio for instant playback');
+      setNarrationText(slide.preGeneratedNarration);
+      const fullAudioUrl = `${API_BASE}${slide.preGeneratedAudio}`;
+      setAudioUrl(fullAudioUrl);
+      
+      // Audio already stopped at start of function
+      
+      const audio = new Audio(fullAudioUrl);
+      audioRef.current = audio;
+      
+      // Add comprehensive audio event logging
+      audio.addEventListener('loadstart', () => console.log('🎵 Audio load started'));
+      audio.addEventListener('loadeddata', () => console.log('🎵 Audio data loaded'));
+      audio.addEventListener('loadedmetadata', () => console.log(`🎵 Audio metadata loaded - Duration: ${audio.duration}s`));
+      audio.addEventListener('canplay', () => console.log('🎵 Audio can start playing'));
+      audio.addEventListener('canplaythrough', () => console.log('🎵 Audio can play through completely'));
+      audio.addEventListener('play', () => console.log('▶️ Audio started playing'));
+      audio.addEventListener('pause', () => console.log('⏸️ Audio paused'));
+      audio.addEventListener('ended', () => console.log('🏁 Audio ended naturally'));
+      audio.addEventListener('abort', () => console.log('🚫 Audio aborted'));
+      audio.addEventListener('stalled', () => console.log('⏳ Audio stalled'));
+      audio.addEventListener('suspend', () => console.log('⏸️ Audio suspended'));
+      audio.addEventListener('emptied', () => console.log('🗑️ Audio emptied'));
+      audio.addEventListener('timeupdate', () => {
+        if (audio.currentTime > 0) {
+          console.log(`⏰ Audio progress: ${audio.currentTime.toFixed(1)}s / ${audio.duration?.toFixed(1) || '?'}s`);
+        }
+      });
+      
+      audio.onloadeddata = () => {
+        console.log('⚡ Pre-generated audio loaded, playing...');
+        audio.play().catch(err => {
+          console.error('Failed to play pre-generated audio:', err);
+          setIsNarrating(false);
+        });
+      };
+      
+      audio.onended = () => {
+        console.log('⚡ Pre-generated audio finished playing completely');
+        setIsNarrating(false);
+      };
+      
+      audio.onerror = (err) => {
+        console.error('⚡ Pre-generated audio error:', err);
+        setIsNarrating(false);
+      };
+      
+      return; // Exit early, no need to make API call
+    }
+    
+    // Fallback: Generate on-demand (slower)
     try {
-      console.log('Requesting narration for slide:', slide);
+      console.log('🐌 No pre-generated audio, requesting on-demand narration for slide:', slide);
       const response = await fetch(`${API_BASE}/api/narrate`, {
         method: 'POST',
         headers: {
@@ -63,7 +227,11 @@ const Walkthrough = () => {
             text: slide.text || slide.narration,
             image: slide.image,
             pageNumber: currentSlide + 1,
-            totalPages: slides.length
+            totalPages: slides.length,
+            pptName: slide.pptName, // Include PPT name for deterministic filenames
+            // Pass pre-generated audio info if available
+            preGeneratedAudio: slide.preGeneratedAudio,
+            preGeneratedNarration: slide.preGeneratedNarration
           }
         }),
       });
@@ -77,13 +245,29 @@ const Walkthrough = () => {
           const fullAudioUrl = `${API_BASE}${data.audioUrl}`;
           setAudioUrl(fullAudioUrl);
           
-          // Create and play audio
-          if (audioRef.current) {
-            audioRef.current.pause();
-          }
+          // Audio already stopped at start of function
           
           const audio = new Audio(fullAudioUrl);
           audioRef.current = audio;
+          
+          // Add comprehensive audio event logging for fallback audio too
+          audio.addEventListener('loadstart', () => console.log('🎵 Fallback audio load started'));
+          audio.addEventListener('loadeddata', () => console.log('🎵 Fallback audio data loaded'));
+          audio.addEventListener('loadedmetadata', () => console.log(`🎵 Fallback audio metadata loaded - Duration: ${audio.duration}s`));
+          audio.addEventListener('canplay', () => console.log('🎵 Fallback audio can start playing'));
+          audio.addEventListener('canplaythrough', () => console.log('🎵 Fallback audio can play through completely'));
+          audio.addEventListener('play', () => console.log('▶️ Fallback audio started playing'));
+          audio.addEventListener('pause', () => console.log('⏸️ Fallback audio paused'));
+          audio.addEventListener('ended', () => console.log('🏁 Fallback audio ended naturally'));
+          audio.addEventListener('abort', () => console.log('🚫 Fallback audio aborted'));
+          audio.addEventListener('stalled', () => console.log('⏳ Fallback audio stalled'));
+          audio.addEventListener('suspend', () => console.log('⏸️ Fallback audio suspended'));
+          audio.addEventListener('emptied', () => console.log('🗑️ Fallback audio emptied'));
+          audio.addEventListener('timeupdate', () => {
+            if (audio.currentTime > 0) {
+              console.log(`⏰ Fallback audio progress: ${audio.currentTime.toFixed(1)}s / ${audio.duration?.toFixed(1) || '?'}s`);
+            }
+          });
           
           audio.onloadeddata = () => {
             console.log('Audio loaded, playing...');
@@ -103,7 +287,7 @@ const Walkthrough = () => {
           };
           
           audio.onended = () => {
-            console.log('Audio finished playing');
+            console.log('Audio finished playing completely');
             setIsNarrating(false);
           };
           

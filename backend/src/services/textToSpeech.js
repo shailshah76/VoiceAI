@@ -11,40 +11,55 @@ class TextToSpeechService {
   constructor() {
     this.outputDir = path.join(process.cwd(), 'uploads', 'audio');
     this.geminiApiKey = process.env.GEMINI_API_KEY;
+    this.cache = new Map(); // Simple in-memory cache for speed
     
-
-    
-          // Initialize Google GenAI client for TTS
-      if (this.geminiApiKey) {
-        this.genAI = new GoogleGenAI({
-          apiKey: this.geminiApiKey
-        });
-      }
+    // Initialize Google GenAI client for TTS
+    if (this.geminiApiKey) {
+      this.genAI = new GoogleGenAI({
+        apiKey: this.geminiApiKey
+      });
+    }
     
     // Ensure audio directory exists
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
-    console.log('TextToSpeechService initialized with Google TTS');
+    console.log('TextToSpeechService initialized with Google TTS and caching');
   }
 
   /**
    * Save WAV file from PCM data using Google TTS format
    */
-  async saveWaveFile(filename, pcmData, channels = 1, rate = 24000, sampleWidth = 2) {
+  async saveWaveFile(filename, audioData, channels = 1, rate = 24000, sampleWidth = 2) {
     return new Promise((resolve, reject) => {
+      console.log(`📁 Creating WAV file: ${filename} (${audioData.length} bytes input)`);
+      
       const writer = new wav.FileWriter(filename, {
         channels,
         sampleRate: rate,
         bitDepth: sampleWidth * 8,
       });
 
-      writer.on('finish', resolve);
-      writer.on('error', reject);
+      writer.on('finish', () => {
+        console.log(`🎵 WAV file creation finished: ${filename}`);
+        resolve();
+      });
+      
+      writer.on('error', (err) => {
+        console.error(`❌ WAV writer error for ${filename}:`, err);
+        reject(err);
+      });
 
-      writer.write(pcmData);
-      writer.end();
+      // Google TTS returns audio data that may need different handling
+      // Try writing the raw audio data directly
+      try {
+        writer.write(audioData);
+        writer.end();
+      } catch (err) {
+        console.error(`❌ Error writing audio data to WAV:`, err);
+        reject(err);
+      }
     });
   }
 
@@ -91,15 +106,34 @@ class TextToSpeechService {
    */
   async textToSpeechGoogle(text, outputPath) {
     try {
-      // Using the exact structure from your sample code
+      // Log full text for debugging
+      console.log(`🎤 TTS Input text (${text.length} chars):`, text);
+      
+      // Don't truncate text - use full narration for complete audio
+      const fullText = text.trim();
+      
+      // Check cache first for speed
+      const cacheKey = fullText;
+      if (this.cache.has(cacheKey)) {
+        const cachedBuffer = this.cache.get(cacheKey);
+        const wavPath = outputPath.replace('.mp3', '.wav');
+        // Save cached audio to new file
+        this.saveWaveFile(wavPath, cachedBuffer).catch(err => 
+          console.error('Cached WAV save error:', err.message)
+        );
+        return cachedBuffer;
+      }
+      
+      // Generate full audio with complete text
+      console.log(`🎵 Generating TTS for full text: "${fullText.substring(0, 100)}${fullText.length > 100 ? '...' : ''}"`);
       const response = await this.genAI.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say cheerfully: ${text}` }] }],
+        contents: [{ parts: [{ text: fullText }] }], // Use full text
         config: {
           responseModalities: ['AUDIO'],
           speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
+              prebuiltVoiceConfig: { voiceName: 'Zephyr' }, // Faster voice option
             },
           },
         },
@@ -112,12 +146,54 @@ class TextToSpeechService {
       }
 
       const audioBuffer = Buffer.from(data, 'base64');
+      console.log(`🎵 Generated audio buffer: ${audioBuffer.length} bytes`);
       
-      // Save as WAV file (browsers can play WAV directly)
+      // Cache the result for future use (limit cache size to 50 items)
+      if (this.cache.size >= 50) {
+        const firstKey = this.cache.keys().next().value;
+        this.cache.delete(firstKey);
+      }
+      this.cache.set(cacheKey, audioBuffer);
+      
+      // Save as WAV file and wait for completion to ensure it's properly saved
       const wavPath = outputPath.replace('.mp3', '.wav');
-      await this.saveWaveFile(wavPath, audioBuffer);
+      console.log(`💾 Saving audio to: ${wavPath}`);
       
-
+      try {
+        // First, save the raw audio data as a backup
+        const rawPath = wavPath.replace('.wav', '.raw');
+        fs.writeFileSync(rawPath, audioBuffer);
+        console.log(`💾 Raw audio saved: ${rawPath} (${audioBuffer.length} bytes)`);
+        
+        // Try to save as WAV
+        await this.saveWaveFile(wavPath, audioBuffer);
+        console.log(`✅ Audio saved successfully: ${wavPath}`);
+        
+        // Verify file size
+        const stats = fs.statSync(wavPath);
+        console.log(`📊 Saved audio file size: ${stats.size} bytes`);
+        
+        // If WAV is significantly smaller than raw, there might be an issue
+        if (stats.size < audioBuffer.length * 0.5) {
+          console.warn(`⚠️ WAV file seems smaller than expected. Raw: ${audioBuffer.length}, WAV: ${stats.size}`);
+        }
+        
+      } catch (err) {
+        console.error('❌ WAV save error:', err.message);
+        
+        // Fallback: save raw audio data directly
+        try {
+          const fallbackPath = wavPath.replace('.wav', '.audio');
+          fs.writeFileSync(fallbackPath, audioBuffer);
+          console.log(`🔄 Fallback: saved raw audio as ${fallbackPath}`);
+        } catch (fallbackErr) {
+          console.error('❌ Fallback save also failed:', fallbackErr.message);
+        }
+        
+        throw new Error(`Failed to save audio file: ${err.message}`);
+      }
+      
+      // Return immediately without waiting for file save
       return audioBuffer;
 
     } catch (error) {

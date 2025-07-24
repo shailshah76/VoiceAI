@@ -2,8 +2,75 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { exec } from 'child_process';
+import imageAnalysisService from '../services/imageAnalysis.js';
+import textToSpeechService from '../services/textToSpeech.js';
 
 const router = express.Router();
+
+// Pre-generate audio for a slide during processing
+async function preGenerateAudio(slideInfo, pptName) {
+  try {
+    console.log(`🎵 Pre-generating audio for slide ${slideInfo.pageNumber}...`);
+    
+    // Create deterministic filename based on PPT name and slide number
+    const cleanPptName = pptName.replace(/[^a-zA-Z0-9]/g, '_'); // Replace special chars with underscores
+    const audioFilename = `slide-${cleanPptName}-${slideInfo.pageNumber}`;
+    
+    // Check if audio file already exists
+    const audioDir = path.join(process.cwd(), 'uploads', 'audio');
+    const existingAudioPath = path.join(audioDir, `${audioFilename}.wav`);
+    
+    if (fs.existsSync(existingAudioPath)) {
+      console.log(`⚡ Using existing audio for slide ${slideInfo.pageNumber}: ${audioFilename}.wav`);
+      const audioUrl = `/uploads/audio/${audioFilename}.wav`;
+      
+      // Try to read existing narration from cache file
+      const narrationCacheFile = path.join(audioDir, `${audioFilename}.txt`);
+      let narration = slideInfo.text || `Slide ${slideInfo.pageNumber}`;
+      
+      if (fs.existsSync(narrationCacheFile)) {
+        try {
+          narration = fs.readFileSync(narrationCacheFile, 'utf-8');
+          console.log(`📄 Using cached narration for slide ${slideInfo.pageNumber}`);
+        } catch (err) {
+          console.warn(`⚠️ Could not read cached narration: ${err.message}`);
+        }
+      }
+      
+      slideInfo.preGeneratedAudio = audioUrl;
+      slideInfo.preGeneratedNarration = narration;
+      return slideInfo;
+    }
+    
+    // Generate narration text using image analysis
+    const imagePath = path.join(process.cwd(), slideInfo.image);
+    const narration = await imageAnalysisService.generateSlideNarration(imagePath, slideInfo);
+    
+    // Generate audio file with deterministic filename
+    const audioUrl = await textToSpeechService.textToSpeechFile(narration, audioFilename);
+    
+    // Cache the narration text alongside the audio
+    const narrationCacheFile = path.join(audioDir, `${audioFilename}.txt`);
+    try {
+      fs.writeFileSync(narrationCacheFile, narration, 'utf-8');
+      console.log(`💾 Cached narration text for slide ${slideInfo.pageNumber}`);
+    } catch (err) {
+      console.warn(`⚠️ Could not cache narration text: ${err.message}`);
+    }
+    
+    console.log(`✅ Pre-generated audio for slide ${slideInfo.pageNumber}: ${audioUrl}`);
+    
+    // Store the audio URL in the slide info
+    slideInfo.preGeneratedAudio = audioUrl;
+    slideInfo.preGeneratedNarration = narration;
+    
+    return slideInfo;
+  } catch (error) {
+    console.error(`❌ Failed to pre-generate audio for slide ${slideInfo.pageNumber}:`, error.message);
+    // Don't fail the whole process if audio generation fails
+    return slideInfo;
+  }
+}
 
 // Helper to convert PPTX to PDF using LibreOffice
 function convertPPTXtoPDF(pptxPath) {
@@ -108,22 +175,40 @@ router.post('/process', async (req, res) => {
     for (const file of files) {
       const absPath = path.join(process.cwd(), file);
       if (file.endsWith('.pptx') || file.endsWith('.ppt')) {
+        // Extract PPT name for deterministic audio filenames
+        const pptName = path.basename(file, path.extname(file));
+        console.log(`📄 Processing PPT: ${pptName}`);
+        
         // Convert PPTX to PDF
         const pdfPath = await convertPPTXtoPDF(absPath);
         // Convert PDF pages to images
         const pageImages = await convertPDFToImages(pdfPath);
         
-        // Create a slide for each page
-        pageImages.forEach((page, index) => {
-          slides.push({
+        // Create slides and only pre-generate audio for the FIRST slide
+        for (let index = 0; index < pageImages.length; index++) {
+          const page = pageImages[index];
+          const slideInfo = {
             id: slides.length + 1,
             image: page.imagePath,
             title: `Slide ${index + 1}`,
             text: `Page ${page.pageNumber} of presentation`,
             pageNumber: page.pageNumber,
-            totalPages: pageImages.length
-          });
-        });
+            totalPages: pageImages.length,
+            pptName: pptName // Store PPT name for audio generation
+          };
+          
+          // Only pre-generate audio for the first slide during upload
+          if (index === 0) {
+            console.log('🎵 Pre-generating audio for FIRST slide only...');
+            const slideWithAudio = await preGenerateAudio(slideInfo, pptName);
+            slides.push(slideWithAudio);
+          } else {
+            // Add slides without audio - will be generated on-demand
+            console.log(`⏳ Slide ${index + 1} queued for lazy audio generation`);
+            slideInfo.audioStatus = 'pending'; // Mark as pending generation
+            slides.push(slideInfo);
+          }
+        }
       } else {
         // For other files, just show as image/text
         slides.push({
