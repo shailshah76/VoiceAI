@@ -60,7 +60,10 @@ const Walkthrough = () => {
           slide: {
             id: slide.id,
             title: slide.title,
-            text: slide.text || slide.narration || `This is slide ${currentSlide + 1}`
+            text: slide.text || slide.narration,
+            image: slide.image,
+            pageNumber: currentSlide + 1,
+            totalPages: slides.length
           }
         }),
       });
