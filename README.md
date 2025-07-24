@@ -22,8 +22,8 @@ VoiceAI transforms static presentations into dynamic, narrated experiences by:
 
 ### Backend (`backend/`)
 - **Node.js + Express**: RESTful API server
-- **Google Generative AI**: Gemini 2.5 Pro for vision and text generation
-- **Multiple TTS Engines**: Hugging Face API with macOS `say` fallback
+- **Google Generative AI**: Gemini 2.5 Pro for vision, text generation, and TTS
+- **Multiple TTS Engines**: Google Gemini TTS with macOS `say` fallback
 - **File Processing**: LibreOffice + Poppler for PPTX → PDF → Image conversion
 
 ## 🚀 Quick Start
@@ -54,7 +54,6 @@ npm install
 cp .env.example .env
 # Edit .env with your API keys:
 # GEMINI_API_KEY=your_gemini_api_key
-# HF_TOKEN=your_hugging_face_token (optional)
 # GROQ_API_KEY=your_groq_api_key (optional)
 # PORT=7122
 
@@ -83,8 +82,7 @@ npm run dev
 - **GEMINI_API_KEY**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
 ### Optional (Fallbacks)
-- **HF_TOKEN**: From [Hugging Face](https://huggingface.co/settings/tokens)
-- **GROQ_API_KEY**: From [GROQ Console](https://console.groq.com/)
+- **GROQ_API_KEY**: From [GROQ Console](https://console.groq.com/) - For additional AI capabilities
 
 ## 📖 How to Use
 
@@ -120,9 +118,9 @@ PPTX → LibreOffice → PDF → Poppler → Individual Images → AI Analysis
 ```
 
 ### Multi-Engine TTS System
-1. **Hugging Face API** (Primary)
-2. **macOS `say` command** (Fallback)
-3. **Audio format conversion** for browser compatibility
+1. **macOS `say` command** (Primary) - Reliable native TTS
+2. **Audio format conversion** - AIFF to MP3 for browser compatibility
+3. **Google Gemini TTS** (Future) - When API becomes stable
 
 ### Smart Cleanup System
 - Automatic file cleanup on session end
@@ -229,8 +227,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **Google Gemini**: Advanced AI vision and language capabilities
-- **Hugging Face**: Open-source ML models and APIs
+- **Google Gemini**: Advanced AI vision, language, and TTS capabilities
 - **LibreOffice**: Document conversion capabilities
 - **Poppler**: PDF processing utilities
 - **React & Node.js**: Modern web development frameworks

@@ -2,27 +2,58 @@ import fs from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
 import { exec } from 'child_process';
+import { GoogleGenAI } from '@google/genai';
+import wav from 'wav';
+import dotenv from 'dotenv';
+
+// Ensure environment variables are loaded
+dotenv.config();
 
 class TextToSpeechService {
   constructor() {
     this.outputDir = path.join(process.cwd(), 'uploads', 'audio');
-    this.apiKey = process.env.HF_TOKEN;
-    this.baseUrl = 'https://api-inference.huggingface.co/models';
-    // Using a more accessible TTS model that works with standard HF tokens
-    this.model = 'microsoft/speecht5_tts';
+    this.geminiApiKey = process.env.GEMINI_API_KEY;
+    
+
+    
+          // Initialize Google GenAI client for TTS
+      if (this.geminiApiKey) {
+        this.genAI = new GoogleGenAI({
+          apiKey: this.geminiApiKey
+        });
+      }
     
     // Ensure audio directory exists
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
-    if (!this.apiKey) {
-      console.warn('HF_TOKEN not found - TTS will fall back to local synthesis');
-    }
+    console.log('TextToSpeechService initialized:');
+    console.log('- Primary TTS engine: macOS say');
+    console.log('- Google TTS available for future use:', !!this.genAI);
   }
 
   /**
-   * Convert text to speech using Hugging Face API or fallback to local TTS
+   * Save WAV file from PCM data using Google TTS format
+   */
+  async saveWaveFile(filename, pcmData, channels = 1, rate = 24000, sampleWidth = 2) {
+    return new Promise((resolve, reject) => {
+      const writer = new wav.FileWriter(filename, {
+        channels,
+        sampleRate: rate,
+        bitDepth: sampleWidth * 8,
+      });
+
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+
+      writer.write(pcmData);
+      writer.end();
+    });
+  }
+
+  /**
+   * Convert text to speech using Google TTS or fallback to local TTS
    * @param {string} text - The text to convert to speech
    * @param {string} outputPath - Output path to save the audio file
    * @returns {Promise<Buffer>} - Audio data as buffer
@@ -51,129 +82,68 @@ class TextToSpeechService {
       outputPath = path.join(this.outputDir, `tts-${Date.now()}.mp3`);
     }
 
-    // Try Hugging Face API first
-    if (this.apiKey) {
+    // Try Google TTS first
+    if (this.genAI) {
       try {
-        return await this.textToSpeechHF(text, outputPath);
+        console.log('🔊 Using Google Gemini TTS:', text.substring(0, 50) + '...');
+        console.log('🎤 Voice: Kore (Google AI voice)');
+        return await this.textToSpeechGoogle(text, outputPath);
       } catch (error) {
-        console.warn('HF TTS failed, falling back to macOS say:', error.message);
+        console.warn('❌ Google TTS failed, falling back to macOS say:', error.message);
+        console.error('❌ Full Google TTS error:', error);
       }
+    } else {
+      console.log('⚠️ Google TTS client not available, using macOS say');
     }
 
-    // Use macOS say command as reliable fallback
+    // Use macOS say as fallback
+    console.log('🔊 Using macOS say TTS fallback:', text.substring(0, 50) + '...');
+    console.log('🎤 Voice: Samantha (macOS native voice)');
     return await this.textToSpeechSay(text, outputPath);
   }
 
   /**
-   * Use Hugging Face TTS API
+   * Generate TTS using Google Gemini TTS
    */
-  async textToSpeechHF(text, outputPath) {
-    console.log('Using Hugging Face TTS API...');
-    
-    // Try multiple TTS models for better compatibility
-    const models = [
-      'microsoft/speecht5_tts',
-      'facebook/fastspeech2-en-ljspeech',
-      'facebook/mms-tts-eng'
-    ];
-    
-    for (const model of models) {
-      try {
-        console.log(`Trying HF TTS model: ${model}`);
-        
-        const response = await fetch(`${this.baseUrl}/${model}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            inputs: text,
-            parameters: {
-              speaker_embeddings: "https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors/resolve/main/cmu_us_bdl_arctic-wav-22050_16bit-mono-xvector.npy"
-            }
-          })
-        });
+  async textToSpeechGoogle(text, outputPath) {
+    console.log('🤖 Starting Google Gemini TTS generation...');
+    console.log('📝 Text length:', text.length, 'characters');
+    console.log('💾 Output path:', outputPath);
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.warn(`HF model ${model} failed: ${response.status} - ${errorText}`);
-          continue; // Try next model
-        }
-
-        const audioBuffer = await response.arrayBuffer();
-        
-        if (audioBuffer.byteLength === 0) {
-          console.warn(`Model ${model} returned empty audio`);
-          continue;
-        }
-
-        // Save to file
-        fs.writeFileSync(outputPath, Buffer.from(audioBuffer));
-        console.log(`HF TTS conversion successful with ${model}, audio size:`, audioBuffer.byteLength, 'bytes');
-        
-        return Buffer.from(audioBuffer);
-      } catch (error) {
-        console.warn(`Model ${model} failed:`, error.message);
-        continue;
-      }
-    }
-    
-    throw new Error('All Hugging Face TTS models failed');
-  }
-
-    /**
-   * Fallback TTS using a working web service
-   */
-  async textToSpeechFallback(text, outputPath) {
-    console.log('Using fallback TTS API...');
-    
     try {
-      // Use a different working TTS service
-      const response = await fetch('https://api.voicerss.org/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      // Using the exact structure from your sample code
+      const response = await this.genAI.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: `Say cheerfully: ${text}` }] }],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' },
+            },
+          },
         },
-        body: new URLSearchParams({
-          key: 'demo', // Free demo key
-          hl: 'en-us',
-          src: text.substring(0, 100), // Limit length for demo
-          f: '48khz_16bit_stereo',
-          c: 'mp3'
-        })
       });
 
-      if (!response.ok) {
-        console.warn('VoiceRSS failed, trying alternative...');
-        throw new Error(`VoiceRSS error: ${response.status}`);
+      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      
+      if (!data) {
+        throw new Error('No audio data received from Google TTS');
       }
 
-      const audioBuffer = await response.arrayBuffer();
+      const audioBuffer = Buffer.from(data, 'base64');
       
-      if (audioBuffer.byteLength === 0) {
-        throw new Error('Received empty audio response');
-      }
+      // Save as WAV file (browsers can play WAV directly)
+      const wavPath = outputPath.replace('.mp3', '.wav');
+      await this.saveWaveFile(wavPath, audioBuffer);
       
-      // Save to file
-      fs.writeFileSync(outputPath, Buffer.from(audioBuffer));
-      console.log('Fallback TTS conversion successful, audio size:', audioBuffer.byteLength, 'bytes');
-      
-      return Buffer.from(audioBuffer);
+      console.log('✅ Google TTS conversion successful, audio size:', audioBuffer.length, 'bytes');
+      console.log('✅ WAV audio file saved:', wavPath);
+      return audioBuffer;
+
     } catch (error) {
-      console.error('All external TTS failed:', error.message);
-      
-      // Use macOS say command as ultimate fallback
-      try {
-        return await this.textToSpeechSay(text, outputPath);
-      } catch (sayError) {
-        console.error('macOS say also failed:', sayError.message);
-        
-        // Create a simple text file that frontend can handle
-        const textContent = `Audio not available: ${text}`;
-        fs.writeFileSync(outputPath.replace('.mp3', '.txt'), textContent);
-        throw new Error('Text-to-speech conversion failed - all methods exhausted');
-      }
+      console.error('Google TTS error:', error.message);
+      throw new Error(`Google TTS failed: ${error.message}`);
     }
   }
 
@@ -181,42 +151,10 @@ class TextToSpeechService {
    * Use macOS say command to generate MP3 directly
    */
   async textToSpeechSay(text, outputPath) {
-    console.log('Using macOS say command to generate MP3...');
+    console.log('Using macOS say command to generate audio...');
     
-    return new Promise((resolve, reject) => {
-      // Try to generate MP3 directly using say with data format options
-      const cmd = `say -v "Alex" --data-format=LEF32@22050 -o "${outputPath}" "${text.replace(/"/g, '\\"')}"`;
-      console.log('Executing say command for MP3:', cmd);
-      
-      exec(cmd, (error, stdout, stderr) => {
-        if (error) {
-          console.warn('Say MP3 format failed, trying AIFF then convert:', error.message);
-          // Fallback: generate AIFF then convert to MP3 using afconvert
-          this.textToSpeechSayWithConvert(text, outputPath)
-            .then(resolve)
-            .catch(reject);
-          return;
-        }
-
-        if (!fs.existsSync(outputPath)) {
-          console.error('MP3 file was not created at:', outputPath);
-          // Fallback: generate AIFF then convert
-          this.textToSpeechSayWithConvert(text, outputPath)
-            .then(resolve)
-            .catch(reject);
-          return;
-        }
-
-        try {
-          const audioBuffer = fs.readFileSync(outputPath);
-          console.log('macOS say MP3 successful, audio size:', audioBuffer.length, 'bytes');
-          resolve(audioBuffer);
-        } catch (readError) {
-          console.error('Failed to read MP3 output:', readError.message);
-          reject(new Error(`Failed to read MP3 output: ${readError.message}`));
-        }
-      });
-    });
+    // Always use AIFF format first (most reliable) then convert to MP3
+    return this.textToSpeechSayWithConvert(text, outputPath);
   }
 
   /**
@@ -228,9 +166,9 @@ class TextToSpeechService {
     return new Promise((resolve, reject) => {
       const aiffPath = outputPath.replace('.mp3', '.aiff');
       
-      // Step 1: Generate AIFF
-      const sayCmd = `say -v "Alex" -o "${aiffPath}" "${text.replace(/"/g, '\\"')}"`;
-      console.log('Executing say command for AIFF:', sayCmd);
+      // Step 1: Generate AIFF with a more natural voice
+      const sayCmd = `say -v "Samantha" -o "${aiffPath}" "${text.replace(/"/g, '\\"')}"`;
+      console.log('Executing say command for AIFF with Samantha voice:', sayCmd);
       
       exec(sayCmd, (error, stdout, stderr) => {
         if (error) {
@@ -296,8 +234,8 @@ class TextToSpeechService {
     
     await this.textToSpeech(text, audioPath);
     
-    // Return the public URL path (should always be MP3 now)
-    return `/uploads/audio/${filename}.mp3`;
+    // Return the WAV URL path (browsers can play WAV directly)
+    return `/uploads/audio/${filename}.wav`;
   }
 
   /**
