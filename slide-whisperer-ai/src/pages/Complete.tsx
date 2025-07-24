@@ -12,12 +12,82 @@ const Complete = () => {
 
   const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:7122';
 
-  const handleStartAgain = () => {
-    navigate("/upload");
+  const handleStartAgain = async () => {
+    setIsCleaningUp(true);
+    setCleanupMessage("");
+
+    try {
+      console.log('🧹 Starting cleanup before starting again...');
+      const response = await fetch(`${API_BASE}/api/cleanup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cleanup failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('🧹 Cleanup result:', result);
+      
+      setCleanupMessage(`✅ Cleanup completed! ${result.filesDeleted} files deleted.`);
+      
+      // Navigate to upload after a short delay
+      setTimeout(() => {
+        navigate("/upload");
+      }, 1500);
+
+    } catch (error) {
+      console.error('❌ Cleanup failed:', error);
+      setCleanupMessage(`❌ Cleanup failed: ${error.message}`);
+      // Still navigate to upload even if cleanup fails
+      setTimeout(() => {
+        navigate("/upload");
+      }, 2000);
+    } finally {
+      setIsCleaningUp(false);
+    }
   };
 
-  const handleNewSlides = () => {
-    navigate("/upload");
+  const handleNewSlides = async () => {
+    setIsCleaningUp(true);
+    setCleanupMessage("");
+
+    try {
+      console.log('🧹 Starting cleanup before uploading new slides...');
+      const response = await fetch(`${API_BASE}/api/cleanup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cleanup failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('🧹 Cleanup result:', result);
+      
+      setCleanupMessage(`✅ Cleanup completed! ${result.filesDeleted} files deleted.`);
+      
+      // Navigate to upload after a short delay
+      setTimeout(() => {
+        navigate("/upload");
+      }, 1500);
+
+    } catch (error) {
+      console.error('❌ Cleanup failed:', error);
+      setCleanupMessage(`❌ Cleanup failed: ${error.message}`);
+      // Still navigate to upload even if cleanup fails
+      setTimeout(() => {
+        navigate("/upload");
+      }, 2000);
+    } finally {
+      setIsCleaningUp(false);
+    }
   };
 
   const handleHome = async () => {
@@ -146,8 +216,17 @@ const Complete = () => {
               className="flex items-center justify-center"
               disabled={isCleaningUp}
             >
-              <RefreshCw className="w-5 h-5 mr-2" />
-              Start Again
+              {isCleaningUp ? (
+                <>
+                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                  Cleaning...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-5 h-5 mr-2" />
+                  Start Again
+                </>
+              )}
             </Button>
             
             <Button 
@@ -157,8 +236,17 @@ const Complete = () => {
               className="flex items-center justify-center"
               disabled={isCleaningUp}
             >
-              <Upload className="w-5 h-5 mr-2" />
-              Upload New Slides
+              {isCleaningUp ? (
+                <>
+                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                  Cleaning...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-5 h-5 mr-2" />
+                  Upload New Slides
+                </>
+              )}
             </Button>
           </div>
           
@@ -181,15 +269,7 @@ const Complete = () => {
           </div>
         </div>
 
-        {/* Tips for next time */}
-        <Card className="mt-8 p-6 bg-accent/10 border-accent/20">
-          <h4 className="font-semibold text-accent-foreground mb-3">💡 Tips for next time:</h4>
-          <ul className="text-sm text-muted-foreground space-y-2">
-            <li>• Try asking more detailed questions about specific slide content</li>
-            <li>• Upload your own presentation slides for a personalized experience</li>
-            <li>• Take advantage of the voice narration to learn while multitasking</li>
-          </ul>
-        </Card>
+
       </div>
     </div>
   );
