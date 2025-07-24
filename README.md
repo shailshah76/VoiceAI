@@ -40,7 +40,7 @@ node --version                # Node.js 18+ required
 ### 1. Clone & Setup
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/shailshah76/VoiceAI.git
 cd VoiceAI
 ```
 
@@ -73,7 +73,7 @@ npm run dev
 
 ### 4. Access Application
 
-- **Frontend**: http://localhost:5173
+- **Frontend**: http://localhost:8080
 - **Backend API**: http://localhost:7122
 
 ## 🔑 API Keys Required
