@@ -5,6 +5,8 @@ import path from 'path';
 
 const router = express.Router();
 
+
+
 // POST /api/narrate
 // Expects: { slide: { title, text, image, pageNumber, totalPages } }
 router.post('/narrate', async (req, res) => {
@@ -24,6 +26,7 @@ router.post('/narrate', async (req, res) => {
       const slideInfo = {
         title: slide.title,
         text: slide.text,
+        image: slide.image,  // Include the image path for Gemini vision
         pageNumber: slide.pageNumber,
         totalPages: slide.totalPages
       };
