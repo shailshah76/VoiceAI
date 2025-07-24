@@ -44,12 +44,8 @@ app.get('/uploads/audio/:filename', (req, res) => {
   const filename = req.params.filename;
   const audioPath = path.join(uploadsPath, 'audio', filename);
   
-  console.log('🎵 Audio request for:', filename);
-  console.log('🔍 Range header:', req.headers.range);
-  
   // Check if file exists
   if (!fs.existsSync(audioPath)) {
-    console.log('❌ Audio file not found:', audioPath);
     return res.status(404).send('Audio file not found');
   }
   

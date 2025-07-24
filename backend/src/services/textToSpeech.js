@@ -1,7 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import fetch from 'node-fetch';
-import { exec } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
 import wav from 'wav';
 import dotenv from 'dotenv';
@@ -28,9 +26,7 @@ class TextToSpeechService {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
-    console.log('TextToSpeechService initialized:');
-    console.log('- Primary TTS engine: macOS say');
-    console.log('- Google TTS available for future use:', !!this.genAI);
+    console.log('TextToSpeechService initialized with Google TTS');
   }
 
   /**
@@ -82,34 +78,18 @@ class TextToSpeechService {
       outputPath = path.join(this.outputDir, `tts-${Date.now()}.mp3`);
     }
 
-    // Try Google TTS first
-    if (this.genAI) {
-      try {
-        console.log('🔊 Using Google Gemini TTS:', text.substring(0, 50) + '...');
-        console.log('🎤 Voice: Kore (Google AI voice)');
-        return await this.textToSpeechGoogle(text, outputPath);
-      } catch (error) {
-        console.warn('❌ Google TTS failed, falling back to macOS say:', error.message);
-        console.error('❌ Full Google TTS error:', error);
-      }
-    } else {
-      console.log('⚠️ Google TTS client not available, using macOS say');
+    // Use Google TTS
+    if (!this.genAI) {
+      throw new Error('Google TTS not available - missing GEMINI_API_KEY');
     }
 
-    // Use macOS say as fallback
-    console.log('🔊 Using macOS say TTS fallback:', text.substring(0, 50) + '...');
-    console.log('🎤 Voice: Samantha (macOS native voice)');
-    return await this.textToSpeechSay(text, outputPath);
+    return await this.textToSpeechGoogle(text, outputPath);
   }
 
   /**
    * Generate TTS using Google Gemini TTS
    */
   async textToSpeechGoogle(text, outputPath) {
-    console.log('🤖 Starting Google Gemini TTS generation...');
-    console.log('📝 Text length:', text.length, 'characters');
-    console.log('💾 Output path:', outputPath);
-
     try {
       // Using the exact structure from your sample code
       const response = await this.genAI.models.generateContent({
@@ -137,91 +117,15 @@ class TextToSpeechService {
       const wavPath = outputPath.replace('.mp3', '.wav');
       await this.saveWaveFile(wavPath, audioBuffer);
       
-      console.log('✅ Google TTS conversion successful, audio size:', audioBuffer.length, 'bytes');
-      console.log('✅ WAV audio file saved:', wavPath);
+
       return audioBuffer;
 
     } catch (error) {
-      console.error('Google TTS error:', error.message);
       throw new Error(`Google TTS failed: ${error.message}`);
     }
   }
 
-  /**
-   * Use macOS say command to generate MP3 directly
-   */
-  async textToSpeechSay(text, outputPath) {
-    console.log('Using macOS say command to generate audio...');
-    
-    // Always use AIFF format first (most reliable) then convert to MP3
-    return this.textToSpeechSayWithConvert(text, outputPath);
-  }
 
-  /**
-   * Fallback: Generate AIFF then convert to MP3 using afconvert
-   */
-  async textToSpeechSayWithConvert(text, outputPath) {
-    console.log('Using AIFF to MP3 conversion fallback...');
-    
-    return new Promise((resolve, reject) => {
-      const aiffPath = outputPath.replace('.mp3', '.aiff');
-      
-      // Step 1: Generate AIFF with a more natural voice
-      const sayCmd = `say -v "Samantha" -o "${aiffPath}" "${text.replace(/"/g, '\\"')}"`;
-      console.log('Executing say command for AIFF with Samantha voice:', sayCmd);
-      
-      exec(sayCmd, (error, stdout, stderr) => {
-        if (error) {
-          console.error('Say AIFF generation failed:', error.message);
-          reject(new Error(`Say AIFF generation failed: ${error.message}`));
-          return;
-        }
-
-        if (!fs.existsSync(aiffPath)) {
-          reject(new Error('AIFF file was not created'));
-          return;
-        }
-
-        // Step 2: Try multiple conversion methods
-        console.log('Attempting AIFF to MP3 conversion...');
-        
-        // Try method 1: afconvert with different parameters
-        let convertCmd = `afconvert -f m4af -d aac "${aiffPath}" "${outputPath.replace('.mp3', '.m4a')}"`;
-        exec(convertCmd, (convertError, convertStdout, convertStderr) => {
-          if (!convertError && fs.existsSync(outputPath.replace('.mp3', '.m4a'))) {
-            // Rename .m4a to .mp3 (browsers can play m4a as mp3)
-            try {
-              fs.renameSync(outputPath.replace('.mp3', '.m4a'), outputPath);
-              const audioBuffer = fs.readFileSync(outputPath);
-              console.log('AIFF to M4A/MP3 conversion successful, audio size:', audioBuffer.length, 'bytes');
-              
-              // Clean up AIFF file
-              if (fs.existsSync(aiffPath)) {
-                fs.unlinkSync(aiffPath);
-              }
-              
-              resolve(audioBuffer);
-              return;
-            } catch (renameError) {
-              console.warn('M4A rename failed:', renameError.message);
-            }
-          }
-          
-          // Fallback: Just use the AIFF file directly and serve it as audio
-          console.warn('MP3 conversion failed, serving AIFF directly');
-          try {
-            const audioBuffer = fs.readFileSync(aiffPath);
-            // Copy AIFF to MP3 path so the URL still works
-            fs.writeFileSync(outputPath, audioBuffer);
-            console.log('Using AIFF as MP3 fallback, audio size:', audioBuffer.length, 'bytes');
-            resolve(audioBuffer);
-          } catch (fallbackError) {
-            reject(new Error(`All conversion methods failed: ${fallbackError.message}`));
-          }
-        });
-      });
-    });
-  }
 
   /**
    * Convert text to speech and save as audio file
