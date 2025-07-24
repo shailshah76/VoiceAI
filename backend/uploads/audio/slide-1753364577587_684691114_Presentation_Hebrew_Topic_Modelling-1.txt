@@ -1,1 +1,0 @@
-So, today, we'll be diving into the fascinating world of topic modelling, specifically applied to Hebrew text. This is crucial because understanding the underlying themes and structures within textual data can unlock valuable insights in fields ranging from linguistics to market research. Now, let's move on to the methodology we employed for this project.

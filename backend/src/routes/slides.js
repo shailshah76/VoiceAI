@@ -4,17 +4,28 @@ import fs from 'fs';
 import { exec } from 'child_process';
 import imageAnalysisService from '../services/imageAnalysis.js';
 import textToSpeechService from '../services/textToSpeech.js';
+import slideContextService from '../services/slideContext.js';
+import { generateFileHash } from '../utils/fileHash.js';
 
 const router = express.Router();
 
 // Pre-generate audio for a slide during processing
-async function preGenerateAudio(slideInfo, pptName) {
+async function preGenerateAudio(slideInfo, pptName, pptFilePath) {
   try {
     console.log(`🎵 Pre-generating audio for slide ${slideInfo.pageNumber}...`);
     
-    // Create deterministic filename based on PPT name and slide number
-    const cleanPptName = pptName.replace(/[^a-zA-Z0-9]/g, '_'); // Replace special chars with underscores
-    const audioFilename = `slide-${cleanPptName}-${slideInfo.pageNumber}`;
+    // Generate file hash for cache key
+    let fileHash = null;
+    try {
+      fileHash = await generateFileHash(pptFilePath);
+      console.log(`🔑 Generated file hash: ${fileHash.substring(0, 8)}...`);
+    } catch (error) {
+      console.warn(`⚠️ Could not generate file hash, falling back to filename: ${error.message}`);
+      fileHash = pptName.replace(/[^a-zA-Z0-9]/g, '_'); // Fallback to filename if hashing fails
+    }
+    
+    // Create deterministic filename based on file hash and slide number
+    const audioFilename = `slide-${fileHash.substring(0, 12)}-${slideInfo.pageNumber}`;
     
     // Check if audio file already exists
     const audioDir = path.join(process.cwd(), 'uploads', 'audio');
@@ -46,8 +57,8 @@ async function preGenerateAudio(slideInfo, pptName) {
     const imagePath = path.join(process.cwd(), slideInfo.image);
     const narration = await imageAnalysisService.generateSlideNarration(imagePath, slideInfo);
     
-    // Generate audio file with deterministic filename
-    const audioUrl = await textToSpeechService.textToSpeechFile(narration, audioFilename);
+    // Generate audio file with deterministic filename and fileHash for caching
+    const audioUrl = await textToSpeechService.textToSpeechFile(narration, audioFilename, fileHash);
     
     // Cache the narration text alongside the audio
     const narrationCacheFile = path.join(audioDir, `${audioFilename}.txt`);
@@ -200,7 +211,7 @@ router.post('/process', async (req, res) => {
           // Only pre-generate audio for the first slide during upload
           if (index === 0) {
             console.log('🎵 Pre-generating audio for FIRST slide only...');
-            const slideWithAudio = await preGenerateAudio(slideInfo, pptName);
+            const slideWithAudio = await preGenerateAudio(slideInfo, pptName, absPath);
             slides.push(slideWithAudio);
           } else {
             // Add slides without audio - will be generated on-demand
@@ -219,7 +230,21 @@ router.post('/process', async (req, res) => {
         });
       }
     }
-    res.json({ slides });
+    // Auto-index the presentation for conversational queries
+    const presentationId = files[0].split('/').pop().split('-')[0] || 'presentation'; // Extract from filename
+    try {
+      console.log('🧠 Auto-indexing presentation for conversation...');
+      await slideContextService.indexPresentation(presentationId, slides);
+    } catch (indexError) {
+      console.warn('⚠️ Could not index presentation for conversation:', indexError.message);
+      // Don't fail the request if indexing fails
+    }
+
+    res.json({ 
+      slides,
+      presentationId: presentationId,
+      conversationReady: true 
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

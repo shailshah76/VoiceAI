@@ -1,1 +1,0 @@
-So, let's dive into topic modeling on Hebrew texts. This is a crucial area, as understanding the underlying themes in these texts allows us to unlock valuable insights and patterns within the language. Now, let's look at the methods we employed to achieve this.

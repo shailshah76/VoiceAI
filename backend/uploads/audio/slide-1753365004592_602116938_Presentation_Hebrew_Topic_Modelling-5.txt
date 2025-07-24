@@ -1,1 +1,0 @@
-So, what this slide summarizes is the Latent Dirichlet Algorithm, a generative statistical model that associates every word in a document to a latent topic, ultimately maximizing the product of document-topic and topic-word probabilities. This allows us to convert raw documents into a structured format for analysis, which leads us to our final conclusions and recommendations.

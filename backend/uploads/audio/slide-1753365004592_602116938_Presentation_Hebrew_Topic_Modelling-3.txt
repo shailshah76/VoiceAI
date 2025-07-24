@@ -1,1 +1,0 @@
-So, let's dive into what topic modelling actually is. We'll first cover the 'what' and 'why' behind it, really understanding the core principles, and then we'll explore some of the common techniques used in topic modelling to extract those insights. Next, we can look at an example of how this works in practice.

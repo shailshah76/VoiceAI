@@ -1,234 +1,261 @@
 import fs from 'fs';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai';
-import wav from 'wav';
 import dotenv from 'dotenv';
+import { generateAudioCacheKey } from '../utils/fileHash.js';
 
-// Ensure environment variables are loaded
 dotenv.config();
 
 class TextToSpeechService {
   constructor() {
     this.outputDir = path.join(process.cwd(), 'uploads', 'audio');
-    this.geminiApiKey = process.env.GEMINI_API_KEY;
-    this.cache = new Map(); // Simple in-memory cache for speed
+    this.cacheDir = path.join(process.cwd(), 'uploads', 'audio-cache');
+    this.groqApiKey = process.env.GROQ_API_KEY;
+    this.voice = process.env.PLAYAI_VOICE || 'Mason-PlayAI'; // Configurable voice
+    this.cache = new Map();
     
-    // Initialize Google GenAI client for TTS
-    if (this.geminiApiKey) {
-      this.genAI = new GoogleGenAI({
-        apiKey: this.geminiApiKey
-      });
-    }
-    
-    // Ensure audio directory exists
+    // Ensure directories exist
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
-    console.log('TextToSpeechService initialized with Google TTS and caching');
+    if (!fs.existsSync(this.cacheDir)) {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+    }
+    
+        console.log(`🎵 TTS Service initialized with Groq/PlayAI: ${this.groqApiKey ? '✅' : '❌ (no key)'}`);
+    console.log(`🎤 Voice: ${this.voice}`);
   }
 
   /**
-   * Save WAV file from PCM data using Google TTS format
+   * Check if cached audio exists
    */
-  async saveWaveFile(filename, audioData, channels = 1, rate = 24000, sampleWidth = 2) {
-    return new Promise((resolve, reject) => {
-      console.log(`📁 Creating WAV file: ${filename} (${audioData.length} bytes input)`);
+  async checkAudioCache(fileHash, textContent) {
+    try {
+      const cacheKey = generateAudioCacheKey(fileHash, textContent);
+      const cachedPath = path.join(this.cacheDir, `${cacheKey}.wav`);
       
-      const writer = new wav.FileWriter(filename, {
-        channels,
-        sampleRate: rate,
-        bitDepth: sampleWidth * 8,
-      });
-
-      writer.on('finish', () => {
-        console.log(`🎵 WAV file creation finished: ${filename}`);
-        resolve();
-      });
-      
-      writer.on('error', (err) => {
-        console.error(`❌ WAV writer error for ${filename}:`, err);
-        reject(err);
-      });
-
-      // Google TTS returns audio data that may need different handling
-      // Try writing the raw audio data directly
-      try {
-        writer.write(audioData);
-        writer.end();
-      } catch (err) {
-        console.error(`❌ Error writing audio data to WAV:`, err);
-        reject(err);
+      if (await fs.promises.access(cachedPath).then(() => true).catch(() => false)) {
+        console.log(`🎵 Cache HIT: ${cacheKey}`);
+        return cachedPath;
       }
-    });
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Cache check error:', error.message);
+      return null;
+    }
   }
 
   /**
-   * Convert text to speech using Google TTS or fallback to local TTS
-   * @param {string} text - The text to convert to speech
-   * @param {string} outputPath - Output path to save the audio file
-   * @returns {Promise<Buffer>} - Audio data as buffer
+   * Save audio to cache
    */
-  async textToSpeech(text, outputPath = null) {
+  async saveToAudioCache(fileHash, textContent, audioBuffer) {
+    try {
+      const cacheKey = generateAudioCacheKey(fileHash, textContent);
+      const cachedPath = path.join(this.cacheDir, `${cacheKey}.wav`);
+      
+      await fs.promises.writeFile(cachedPath, audioBuffer);
+      console.log(`💾 Cached: ${cacheKey}`);
+      
+      return cachedPath;
+    } catch (error) {
+      console.error('❌ Cache save error:', error.message);
+    }
+  }
+
+  /**
+   * PlayAI TTS through Groq API
+   * Available voices: Aaliyah-PlayAI, Adelaide-PlayAI, Angelo-PlayAI, Arista-PlayAI, 
+   * Atlas-PlayAI, Basil-PlayAI, Briggs-PlayAI, Calum-PlayAI, Celeste-PlayAI, 
+   * Cheyenne-PlayAI, Chip-PlayAI, Cillian-PlayAI, Deedee-PlayAI, Eleanor-PlayAI, 
+   * Fritz-PlayAI, Gail-PlayAI, Indigo-PlayAI, Jennifer-PlayAI, Judy-PlayAI, 
+   * Mamaw-PlayAI, Mason-PlayAI, Mikail-PlayAI, Mitch-PlayAI, Nia-PlayAI, 
+   * Quinn-PlayAI, Ruby-PlayAI, Thunder-PlayAI
+   */
+  async textToSpeechGroqPlayAI(text) {
+    if (!this.groqApiKey) {
+      throw new Error('Groq API key not configured');
+    }
+
+    console.log('🔧 Groq/PlayAI TTS request starting...');
+
+    const response = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.groqApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'playai-tts',
+        input: text,
+        voice: this.voice,
+        response_format: 'wav'
+      })
+    });
+
+    console.log(`📡 Groq Response: ${response.status} ${response.statusText}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Groq/PlayAI Error:', errorText);
+      throw new Error(`Groq/PlayAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = Buffer.from(arrayBuffer);
+    
+    console.log(`✅ Groq/PlayAI Success: ${audioBuffer.length} bytes`);
+    
+    if (audioBuffer.length < 100) {
+      throw new Error(`Groq/PlayAI returned invalid audio: ${audioBuffer.length} bytes`);
+    }
+
+    return audioBuffer;
+  }
+
+  /**
+   * Create test beep audio as fallback
+   */
+  createTestAudio(textLength = 100) {
+    console.log('🔊 Generating test beep audio...');
+    
+    const sampleRate = 44100;
+    const channels = 1;
+    const bitsPerSample = 16;
+    const durationSeconds = Math.min(Math.max(textLength / 50, 2), 8);
+    const bytesPerSample = bitsPerSample / 8;
+    const blockAlign = channels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = sampleRate * durationSeconds * blockAlign;
+    const fileSize = 36 + dataSize;
+
+    // WAV header
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(fileSize, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataSize, 40);
+    
+    // Beep pattern audio data
+    const audioData = Buffer.alloc(dataSize);
+    const frequency = 440;
+    const volume = 0.3;
+    
+    for (let i = 0; i < dataSize / 2; i++) {
+      const t = i / sampleRate;
+      const beepCycle = t % 1.0;
+      let sample = 0;
+      
+      if (beepCycle < 0.2) {
+        sample = Math.sin(2 * Math.PI * frequency * t) * volume * 32767;
+      }
+      
+      audioData.writeInt16LE(Math.round(sample), i * 2);
+    }
+    
+    return Buffer.concat([header, audioData]);
+  }
+
+  /**
+   * Main TTS method
+   */
+  async textToSpeech(text, outputPath = null, fileHash = null) {
     if (!text || typeof text !== 'string') {
       throw new Error('Text input is required and must be a string');
     }
 
-    console.log('Converting text to speech:', text.substring(0, 50) + '...');
-
-    // Ensure audio directory exists before saving
-    if (!fs.existsSync(this.outputDir)) {
-      console.log('Creating audio directory:', this.outputDir);
-      fs.mkdirSync(this.outputDir, { recursive: true });
-    }
-    
-    // Also ensure the output directory for the specific file exists
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) {
-      console.log('Creating output directory:', outputDir);
-      fs.mkdirSync(outputDir, { recursive: true });
+    const cleanText = text.trim();
+    if (!cleanText) {
+      throw new Error('Text content is empty');
     }
 
-    if (!outputPath) {
-      outputPath = path.join(this.outputDir, `tts-${Date.now()}.mp3`);
-    }
+    console.log(`🎤 TTS Request: "${cleanText.substring(0, 80)}${cleanText.length > 80 ? '...' : ''}"`);
 
-    // Use Google TTS
-    if (!this.genAI) {
-      throw new Error('Google TTS not available - missing GEMINI_API_KEY');
-    }
-
-    return await this.textToSpeechGoogle(text, outputPath);
-  }
-
-  /**
-   * Generate TTS using Google Gemini TTS
-   */
-  async textToSpeechGoogle(text, outputPath) {
-    try {
-      // Log full text for debugging
-      console.log(`🎤 TTS Input text (${text.length} chars):`, text);
-      
-      // Don't truncate text - use full narration for complete audio
-      const fullText = text.trim();
-      
-      // Check cache first for speed
-      const cacheKey = fullText;
-      if (this.cache.has(cacheKey)) {
-        const cachedBuffer = this.cache.get(cacheKey);
-        const wavPath = outputPath.replace('.mp3', '.wav');
-        // Save cached audio to new file
-        this.saveWaveFile(wavPath, cachedBuffer).catch(err => 
-          console.error('Cached WAV save error:', err.message)
-        );
-        return cachedBuffer;
+    // Check cache first
+    if (fileHash) {
+      const cachedPath = await this.checkAudioCache(fileHash, cleanText);
+      if (cachedPath) {
+        if (outputPath) {
+          await fs.promises.copyFile(cachedPath, outputPath);
+          return outputPath;
+        }
+        return cachedPath;
       }
-      
-      // Generate full audio with complete text
-      console.log(`🎵 Generating TTS for full text: "${fullText.substring(0, 100)}${fullText.length > 100 ? '...' : ''}"`);
-      const response = await this.genAI.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: fullText }] }], // Use full text
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Zephyr' }, // Faster voice option
-            },
-          },
-        },
-      });
+    }
 
-      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      
-      if (!data) {
-        throw new Error('No audio data received from Google TTS');
+    // Set output path
+    if (outputPath) {
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
       }
+    } else {
+      outputPath = path.join(this.outputDir, `tts-${Date.now()}.wav`);
+    }
 
-      const audioBuffer = Buffer.from(data, 'base64');
-      console.log(`🎵 Generated audio buffer: ${audioBuffer.length} bytes`);
-      
-      // Cache the result for future use (limit cache size to 50 items)
-      if (this.cache.size >= 50) {
-        const firstKey = this.cache.keys().next().value;
-        this.cache.delete(firstKey);
-      }
-      this.cache.set(cacheKey, audioBuffer);
-      
-      // Save as WAV file and wait for completion to ensure it's properly saved
-      const wavPath = outputPath.replace('.mp3', '.wav');
-      console.log(`💾 Saving audio to: ${wavPath}`);
-      
+    let audioBuffer = null;
+    let serviceName = 'none';
+
+    // Try Groq/PlayAI TTS
+    if (this.groqApiKey) {
       try {
-        // First, save the raw audio data as a backup
-        const rawPath = wavPath.replace('.wav', '.raw');
-        fs.writeFileSync(rawPath, audioBuffer);
-        console.log(`💾 Raw audio saved: ${rawPath} (${audioBuffer.length} bytes)`);
-        
-        // Try to save as WAV
-        await this.saveWaveFile(wavPath, audioBuffer);
-        console.log(`✅ Audio saved successfully: ${wavPath}`);
-        
-        // Verify file size
-        const stats = fs.statSync(wavPath);
-        console.log(`📊 Saved audio file size: ${stats.size} bytes`);
-        
-        // If WAV is significantly smaller than raw, there might be an issue
-        if (stats.size < audioBuffer.length * 0.5) {
-          console.warn(`⚠️ WAV file seems smaller than expected. Raw: ${audioBuffer.length}, WAV: ${stats.size}`);
-        }
-        
-      } catch (err) {
-        console.error('❌ WAV save error:', err.message);
-        
-        // Fallback: save raw audio data directly
-        try {
-          const fallbackPath = wavPath.replace('.wav', '.audio');
-          fs.writeFileSync(fallbackPath, audioBuffer);
-          console.log(`🔄 Fallback: saved raw audio as ${fallbackPath}`);
-        } catch (fallbackErr) {
-          console.error('❌ Fallback save also failed:', fallbackErr.message);
-        }
-        
-        throw new Error(`Failed to save audio file: ${err.message}`);
+        audioBuffer = await this.textToSpeechGroqPlayAI(cleanText);
+        serviceName = 'Groq/PlayAI';
+      } catch (error) {
+        console.error('❌ Groq/PlayAI failed:', error.message);
+      }
+    }
+
+    // Fallback to test audio
+    if (!audioBuffer) {
+      console.log('🎵 Using test beep fallback');
+      audioBuffer = this.createTestAudio(cleanText.length);
+      serviceName = 'TestBeep';
+    }
+
+    // Save audio file
+    try {
+      await fs.promises.writeFile(outputPath, audioBuffer);
+      console.log(`✅ TTS Success (${serviceName}): ${outputPath} (${audioBuffer.length} bytes)`);
+      
+      // Cache if not test audio
+      if (fileHash && serviceName !== 'TestBeep') {
+        await this.saveToAudioCache(fileHash, cleanText, audioBuffer);
       }
       
-      // Return immediately without waiting for file save
-      return audioBuffer;
-
+      return outputPath;
     } catch (error) {
-      throw new Error(`Google TTS failed: ${error.message}`);
+      console.error('❌ File save error:', error.message);
+      throw new Error(`Failed to save audio file: ${error.message}`);
     }
   }
 
-
-
   /**
-   * Convert text to speech and save as audio file
-   * @param {string} text - The text to convert
-   * @param {string} filename - Output filename (without extension)
-   * @returns {Promise<string>} - Path to the saved audio file
+   * Generate TTS for a file with filename
    */
-  async textToSpeechFile(text, filename) {
-    const audioPath = path.join(this.outputDir, `${filename}.mp3`);
-    
-    await this.textToSpeech(text, audioPath);
-    
-    // Return the WAV URL path (browsers can play WAV directly)
+  async textToSpeechFile(text, filename, fileHash = null) {
+    const audioPath = path.join(this.outputDir, `${filename}.wav`);
+    await this.textToSpeech(text, audioPath, fileHash);
     return `/uploads/audio/${filename}.wav`;
   }
 
   /**
    * Generate narration for a slide
-   * @param {Object} slide - Slide object with title and text
-   * @returns {Promise<string>} - Path to the audio file
    */
   async generateSlideNarration(slide) {
     if (!slide) {
       throw new Error('Slide object is required');
     }
 
-    // Create narration text from slide content
     let narrationText = '';
     
     if (slide.title) {
@@ -243,28 +270,45 @@ class TextToSpeechService {
       narrationText = 'This slide contains visual content.';
     }
 
-    // Generate unique filename based on slide ID and timestamp
     const filename = `narration-${slide.id || 'slide'}-${Date.now()}`;
     
-    console.log('Generating narration for slide:', slide.id || 'unknown');
-    console.log('Narration text:', narrationText);
+    console.log(`🎬 Generating narration for slide: ${slide.id || 'unknown'}`);
     
     return await this.textToSpeechFile(narrationText, filename);
   }
 
   /**
-   * Check if TTS is available on the system
-   * @returns {Promise<boolean>}
+   * Health check
    */
-  async checkTTSAvailability() {
-    return new Promise((resolve) => {
-      exec('which say', (error) => {
-        resolve(!error);
-      });
-    });
+  async healthCheck() {
+    return {
+      groq_playai: !!this.groqApiKey,
+      cache_size: this.cache.size,
+      output_dir: this.outputDir,
+      cache_dir: this.cacheDir
+    };
+  }
+
+  /**
+   * Debug test method
+   */
+  async debugTest() {
+    const testText = "Hello, this is a test of the text to speech system.";
+    console.log('🧪 Testing Groq/PlayAI TTS...');
+    
+    try {
+      const audioBuffer = await this.textToSpeechGroqPlayAI(testText);
+      const testPath = path.join(this.outputDir, 'debug-test.wav');
+      await fs.promises.writeFile(testPath, audioBuffer);
+      console.log(`✅ Test Success: ${testPath} (${audioBuffer.length} bytes)`);
+      return { success: true, path: testPath, size: audioBuffer.length };
+    } catch (error) {
+      console.error(`❌ Test Failed: ${error.message}`);
+      return { success: false, error: error.message };
+    }
   }
 }
 
 // Export singleton instance
 const textToSpeechService = new TextToSpeechService();
-export default textToSpeechService; 
+export default textToSpeechService;

@@ -1,1 +1,0 @@
-Before we dive deeper into the applications, let's level-set on what topic modeling actually is. We'll start by answering the fundamental questions: "What is it?" and "Why do we use it?" Then, we'll explore some of the techniques used to bring these models to life.

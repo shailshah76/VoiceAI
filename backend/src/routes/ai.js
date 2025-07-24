@@ -1,6 +1,8 @@
 import express from 'express';
 import textToSpeechService from '../services/textToSpeech.js';
 import imageAnalysisService from '../services/imageAnalysis.js';
+import slideContextService from '../services/slideContext.js';
+import aiProvider from '../services/aiProvider.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -307,6 +309,179 @@ router.post('/pregenerate-audio', async (req, res) => {
       error: error.message,
       message: `Failed to generate audio for slide ${slide.pageNumber}`
     });
+  }
+});
+
+// POST /api/conversation/ask
+// Conversational AI endpoint for asking questions about slides
+router.post('/conversation/ask', async (req, res) => {
+  const { question, presentationId, currentSlideNumber, slides } = req.body;
+  
+  if (!question || !presentationId) {
+    return res.status(400).json({ error: 'Question and presentationId are required' });
+  }
+  
+  console.log(`🗣️ User asked: "${question}" for presentation ${presentationId}`);
+  
+  try {
+    // Index presentation if not already indexed
+    if (!slideContextService.presentations.has(presentationId)) {
+      console.log('📚 Indexing presentation for conversation...');
+      await slideContextService.indexPresentation(presentationId, slides);
+    }
+    
+    // Find relevant slides for the question
+    const searchResult = await slideContextService.findRelevantSlides(
+      presentationId, 
+      question, 
+      currentSlideNumber
+    );
+    
+    if (searchResult.relevantSlides.length === 0) {
+      return res.json({
+        response: "I couldn't find specific information about that in the current presentation. Could you rephrase your question or ask about a different topic?",
+        suggestedSlide: null,
+        audioUrl: null,
+        relevantSlides: []
+      });
+    }
+    
+    // Get the most relevant slide
+    const mostRelevant = searchResult.relevantSlides[0];
+    const targetSlide = mostRelevant.slide;
+    
+    // Generate conversational response
+    const conversationalResponse = await slideContextService.generateSlideResponse(
+      targetSlide, 
+      question,
+      `Context: ${searchResult.suggestedResponse}`
+    );
+    
+    console.log(`🤖 Generated response: ${conversationalResponse.substring(0, 100)}...`);
+    
+    // Generate audio for the response
+    const audioFilename = `conversation-${presentationId}-${Date.now()}`;
+    const audioUrl = await textToSpeechService.textToSpeechFile(conversationalResponse, audioFilename);
+    
+    res.json({
+      response: conversationalResponse,
+      suggestedSlide: {
+        slideNumber: targetSlide.pageNumber,
+        title: targetSlide.title,
+        reason: mostRelevant.reason,
+        confidence: mostRelevant.score
+      },
+      audioUrl: audioUrl,
+      relevantSlides: searchResult.relevantSlides.slice(0, 3).map(item => ({
+        slideNumber: item.slide.pageNumber,
+        title: item.slide.title,
+        reason: item.reason,
+        confidence: item.score
+      }))
+    });
+    
+  } catch (error) {
+    console.error('❌ Conversation failed:', error.message);
+    res.status(500).json({
+      error: 'Failed to process your question',
+      message: error.message
+    });
+  }
+});
+
+// POST /api/conversation/index
+// Index a presentation for conversational queries
+router.post('/conversation/index', async (req, res) => {
+  const { presentationId, slides } = req.body;
+  
+  if (!presentationId || !slides) {
+    return res.status(400).json({ error: 'PresentationId and slides are required' });
+  }
+  
+  try {
+    console.log(`🧠 Indexing presentation ${presentationId} for conversation...`);
+    const indexedSlides = await slideContextService.indexPresentation(presentationId, slides);
+    
+    const summary = slideContextService.getPresentationSummary(presentationId);
+    
+    res.json({
+      success: true,
+      presentationId: presentationId,
+      indexedSlides: indexedSlides.length,
+      summary: summary,
+      message: `Presentation indexed successfully. You can now ask questions about ${indexedSlides.length} slides.`
+    });
+    
+  } catch (error) {
+    console.error('❌ Indexing failed:', error.message);
+    res.status(500).json({
+      error: 'Failed to index presentation',
+      message: error.message
+    });
+  }
+});
+
+// GET /api/conversation/summary/:presentationId
+// Get presentation summary for conversation context
+router.get('/conversation/summary/:presentationId', (req, res) => {
+  const { presentationId } = req.params;
+  
+  const summary = slideContextService.getPresentationSummary(presentationId);
+  
+  if (!summary) {
+    return res.status(404).json({ error: 'Presentation not found or not indexed' });
+  }
+  
+  res.json({
+    presentationId: presentationId,
+    ...summary,
+    availableTopics: summary.topics,
+    conversationReady: true
+  });
+});
+
+// GET /api/ai-providers
+// Get available AI providers and current status
+router.get('/ai-providers', (req, res) => {
+  try {
+    const status = aiProvider.getStatus();
+    res.json({
+      ...status,
+      message: `Currently using ${status.currentProvider.toUpperCase()}`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/ai-providers/switch
+// Switch to a different AI provider
+router.post('/ai-providers/switch', (req, res) => {
+  const { provider } = req.body;
+  
+  if (!provider) {
+    return res.status(400).json({ error: 'Provider name is required' });
+  }
+  
+  try {
+    const success = aiProvider.setProvider(provider);
+    
+    if (success) {
+      const status = aiProvider.getStatus();
+      res.json({
+        success: true,
+        ...status,
+        message: `Successfully switched to ${provider.toUpperCase()}`
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: `Provider ${provider} is not available`,
+        availableProviders: aiProvider.getAvailableProviders()
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

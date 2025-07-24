@@ -38,9 +38,51 @@ const Walkthrough = () => {
   const [userQuestion, setUserQuestion] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [narrationText, setNarrationText] = useState("");
+  const [conversationMode, setConversationMode] = useState(false);
+  const [conversationResponse, setConversationResponse] = useState("");
+  const [suggestedSlide, setSuggestedSlide] = useState<any>(null);
+  const [presentationId, setPresentationId] = useState("");
+  const [recognition, setRecognition] = useState<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const slide = slides[currentSlide];
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognitionInstance = new SpeechRecognition();
+      
+      recognitionInstance.continuous = false;
+      recognitionInstance.interimResults = false;
+      recognitionInstance.lang = 'en-US';
+      
+      recognitionInstance.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        console.log('🎤 User said:', transcript);
+        setUserQuestion(transcript);
+        handleConversationQuestion(transcript);
+      };
+      
+      recognitionInstance.onerror = (event: any) => {
+        console.error('🎤 Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+      
+      recognitionInstance.onend = () => {
+        setIsListening(false);
+      };
+      
+      setRecognition(recognitionInstance);
+    }
+  }, []);
+
+  // Extract presentation ID from slides
+  useEffect(() => {
+    if (slides.length > 0 && slides[0].pptName) {
+      setPresentationId(slides[0].pptName);
+    }
+  }, [slides]);
 
   // Background audio generation for next slide  
   const preGenerateNextSlideAudio = async (nextSlideIndex: number) => {
@@ -112,6 +154,97 @@ const Walkthrough = () => {
         newSlides[nextSlideIndex] = { ...newSlides[nextSlideIndex], audioStatus: 'failed' };
         return newSlides;
       });
+    }
+  };
+
+  // Handle conversational questions
+  const handleConversationQuestion = async (question: string) => {
+    if (!question.trim() || !presentationId) return;
+    
+    console.log(`🗣️ Processing question: "${question}"`);
+    setConversationMode(true);
+    setConversationResponse("Thinking...");
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/conversation/ask`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: question,
+          presentationId: presentationId,
+          currentSlideNumber: currentSlide + 1,
+          slides: slides
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🤖 Conversation response:', data);
+        
+        setConversationResponse(data.response);
+        setSuggestedSlide(data.suggestedSlide);
+        
+        // Play the response audio
+        if (data.audioUrl) {
+          const fullAudioUrl = `${API_BASE}${data.audioUrl}`;
+          
+          // Stop current audio
+          if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+          }
+          
+          const audio = new Audio(fullAudioUrl);
+          audioRef.current = audio;
+          
+          audio.onloadeddata = () => {
+            console.log('🤖 Playing conversation response...');
+            audio.play().catch(err => {
+              console.error('Failed to play conversation response:', err);
+            });
+          };
+          
+          audio.onended = () => {
+            console.log('🤖 Conversation response finished');
+            // Optionally navigate to suggested slide
+            if (data.suggestedSlide && data.suggestedSlide.confidence > 0.7) {
+              setTimeout(() => {
+                navigateToSlide(data.suggestedSlide.slideNumber - 1);
+              }, 1000);
+            }
+          };
+        }
+      } else {
+        setConversationResponse("Sorry, I couldn't process your question. Please try again.");
+      }
+    } catch (error) {
+      console.error('❌ Conversation error:', error);
+      setConversationResponse("Sorry, there was an error processing your question.");
+    }
+  };
+
+  const navigateToSlide = (slideIndex: number) => {
+    if (slideIndex >= 0 && slideIndex < slides.length) {
+      setCurrentSlide(slideIndex);
+    }
+  };
+
+  const startListening = () => {
+    if (recognition && !isListening) {
+      setUserQuestion("");
+      setConversationResponse("");
+      setSuggestedSlide(null);
+      setIsListening(true);
+      recognition.start();
+    }
+  };
+
+  const stopListening = () => {
+    if (recognition && isListening) {
+      recognition.stop();
+      setIsListening(false);
     }
   };
 
@@ -313,21 +446,9 @@ const Walkthrough = () => {
 
   const toggleListening = () => {
     if (isListening) {
-      setIsListening(false);
-      // Simulate user asking a question
-      setUserQuestion("Can you explain more about wind energy efficiency?");
-      setTimeout(() => {
-        navigate("/response", { 
-          state: { 
-            question: userQuestion,
-            slideIndex: currentSlide,
-            totalSlides: slides.length
-          }
-        });
-      }, 1000);
+      stopListening();
     } else {
-      setIsListening(true);
-      setUserQuestion("");
+      startListening();
     }
   };
 
@@ -442,6 +563,65 @@ const Walkthrough = () => {
               </div>
             )}
           </div>
+
+          {/* Conversation Interface */}
+          {conversationMode && (
+            <Card className="w-full max-w-2xl p-6 bg-blue-50 border-blue-200 animate-fade-in">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium text-blue-700">🤖 AI Assistant</span>
+                </div>
+                
+                {userQuestion && (
+                  <div className="bg-white p-4 rounded-lg border shadow-sm">
+                    <p className="text-sm text-gray-600 mb-1">You asked:</p>
+                    <p className="font-medium text-gray-800">"{userQuestion}"</p>
+                  </div>
+                )}
+                
+                {conversationResponse && (
+                  <div className="bg-blue-100 p-4 rounded-lg border border-blue-200">
+                    <p className="text-sm leading-relaxed">{conversationResponse}</p>
+                  </div>
+                )}
+                
+                {suggestedSlide && (
+                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-green-700 mb-1">
+                          💡 Relevant content found on Slide {suggestedSlide.slideNumber}
+                        </p>
+                        <p className="text-xs text-green-600 mb-2">{suggestedSlide.reason}</p>
+                        <p className="text-xs text-gray-500">
+                          Confidence: {Math.round((suggestedSlide.confidence || 0) * 100)}%
+                        </p>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        onClick={() => navigateToSlide(suggestedSlide.slideNumber - 1)}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        Go to Slide
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex justify-center">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setConversationMode(false)}
+                    className="text-gray-600"
+                  >
+                    Close Conversation
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Navigation */}
           <div className="flex space-x-4">
