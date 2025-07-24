@@ -1,0 +1,1 @@
+So, today we’re going to be talking about Topic Modelling on Hebrew. This is a project my team and I have been working on, and the key goal is to uncover hidden themes and patterns within a large corpus of Hebrew text. Let’s dive into the approach we took and what we discovered.

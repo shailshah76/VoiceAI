@@ -1,0 +1,1 @@
+So, what is Topic Modelling? The next few minutes will be spent discussing exactly that, as well as why it is important for us, and touching on the various techniques available. After this brief introduction, we can dive into specifics of how we are leveraging particular techniques for our use-case.
