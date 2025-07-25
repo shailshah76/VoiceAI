@@ -1,3 +1,9 @@
+## Demo Video
+
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/29af8d328a9a4277bf04a24781a6f3e8-with-play.gif)](https://www.loom.com/share/29af8d328a9a4277bf04a24781a6f3e8?sid=cfda3162-914e-4641-ae34-448d5c247f94)
+
+[Watch the demo video directly](https://www.loom.com/share/29af8d328a9a4277bf04a24781a6f3e8?sid=cfda3162-914e-4641-ae34-448d5c247f94)
+
 # Welcome to your Lovable project
 
 ## Project info
