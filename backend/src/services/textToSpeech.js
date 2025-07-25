@@ -178,7 +178,15 @@ class TextToSpeechService {
       throw new Error('Text content is empty');
     }
 
-    console.log(`🎤 TTS Request: "${cleanText.substring(0, 80)}${cleanText.length > 80 ? '...' : ''}"`);
+    // DETAILED LOGGING FOR Q&A TTS DEBUGGING
+    console.log('================ Q&A TTS DEBUG ================');
+    console.log(`Q&A TTS Request: "${cleanText.substring(0, 120)}${cleanText.length > 120 ? '...' : ''}"`);
+    if (fileHash) {
+      console.log('Q&A TTS fileHash:', fileHash);
+    }
+    if (outputPath) {
+      console.log('Q&A TTS outputPath:', outputPath);
+    }
 
     // Check cache first
     if (fileHash) {
@@ -186,8 +194,12 @@ class TextToSpeechService {
       if (cachedPath) {
         if (outputPath) {
           await fs.promises.copyFile(cachedPath, outputPath);
+          console.log('Q&A TTS: Cache HIT, returning cached audio.');
+          console.log('===============================================');
           return outputPath;
         }
+        console.log('Q&A TTS: Cache HIT, returning cached audio.');
+        console.log('===============================================');
         return cachedPath;
       }
     }
@@ -208,14 +220,14 @@ class TextToSpeechService {
     // Try Groq/PlayAI TTS
     if (this.groqApiKey) {
       try {
+        console.log('Q&A TTS: Trying Groq/PlayAI...');
         audioBuffer = await this.textToSpeechGroqPlayAI(cleanText);
         serviceName = 'Groq/PlayAI';
+        console.log('Q&A TTS: Groq/PlayAI succeeded.');
       } catch (error) {
-        console.error('❌ Groq/PlayAI failed:', error.message);
-        
-        // Check if it's a rate limit error
+        console.error('Q&A TTS: ❌ Groq/PlayAI failed:', error.message);
         if (error.message.includes('429') || error.message.includes('rate limit')) {
-          console.warn('⚠️ Groq PlayAI rate limit reached. Consider upgrading plan or trying again later.');
+          console.warn('Q&A TTS: ⚠️ Groq PlayAI rate limit reached. Consider upgrading plan or trying again later.');
         }
       }
     }
@@ -223,18 +235,19 @@ class TextToSpeechService {
     // Try Gemini TTS as fallback
     if (!audioBuffer) {
       try {
-        console.log('🔄 Trying Gemini TTS as fallback...');
+        console.log('Q&A TTS: Trying Gemini TTS as fallback...');
         audioBuffer = await this.testGeminiLiveTTS(cleanText);
         serviceName = 'Gemini Live TTS';
+        console.log('Q&A TTS: Gemini TTS succeeded.');
       } catch (error) {
-        console.error('❌ Gemini TTS fallback failed:', error.message);
+        console.error('Q&A TTS: ❌ Gemini TTS fallback failed:', error.message);
       }
     }
 
     // Final fallback to test audio
     if (!audioBuffer) {
-      console.log('🎵 Using test beep fallback - all TTS services failed');
-      console.log('💡 Rate limit info: Groq PlayAI resets daily. Try again in a few hours.');
+      console.log('Q&A TTS: 🎵 Using test beep fallback - all TTS services failed');
+      console.log('Q&A TTS: 💡 Rate limit info: Groq PlayAI resets daily. Try again in a few hours.');
       audioBuffer = this.createTestAudio(cleanText.length);
       serviceName = 'TestBeep';
     }
@@ -242,16 +255,15 @@ class TextToSpeechService {
     // Save audio file
     try {
       await fs.promises.writeFile(outputPath, audioBuffer);
-      console.log(`✅ TTS Success (${serviceName}): ${outputPath} (${audioBuffer.length} bytes)`);
-      
-      // Cache if not test audio
+      console.log(`Q&A TTS: ✅ TTS Success (${serviceName}): ${outputPath} (${audioBuffer.length} bytes)`);
       if (fileHash && serviceName !== 'TestBeep') {
         await this.saveToAudioCache(fileHash, cleanText, audioBuffer);
       }
-      
+      console.log('================ END Q&A TTS DEBUG ================');
       return outputPath;
     } catch (error) {
-      console.error('❌ File save error:', error.message);
+      console.error('Q&A TTS: ❌ File save error:', error.message);
+      console.log('================ END Q&A TTS DEBUG ================');
       throw new Error(`Failed to save audio file: ${error.message}`);
     }
   }
