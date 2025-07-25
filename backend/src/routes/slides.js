@@ -12,15 +12,12 @@ const router = express.Router();
 // Pre-generate audio for a slide during processing
 async function preGenerateAudio(slideInfo, pptName, pptFilePath) {
   try {
-    console.log(`🎵 Pre-generating audio for slide ${slideInfo.pageNumber}...`);
     
     // Generate file hash for cache key
     let fileHash = null;
     try {
       fileHash = await generateFileHash(pptFilePath);
-      console.log(`🔑 Generated file hash: ${fileHash.substring(0, 8)}...`);
     } catch (error) {
-      console.warn(`⚠️ Could not generate file hash, falling back to filename: ${error.message}`);
       fileHash = pptName.replace(/[^a-zA-Z0-9]/g, '_'); // Fallback to filename if hashing fails
     }
     
@@ -32,7 +29,6 @@ async function preGenerateAudio(slideInfo, pptName, pptFilePath) {
     const existingAudioPath = path.join(audioDir, `${audioFilename}.wav`);
     
     if (fs.existsSync(existingAudioPath)) {
-      console.log(`⚡ Using existing audio for slide ${slideInfo.pageNumber}: ${audioFilename}.wav`);
       const audioUrl = `/uploads/audio/${audioFilename}.wav`;
       
       // Try to read existing narration from cache file
@@ -42,9 +38,8 @@ async function preGenerateAudio(slideInfo, pptName, pptFilePath) {
       if (fs.existsSync(narrationCacheFile)) {
         try {
           narration = fs.readFileSync(narrationCacheFile, 'utf-8');
-          console.log(`📄 Using cached narration for slide ${slideInfo.pageNumber}`);
         } catch (err) {
-          console.warn(`⚠️ Could not read cached narration: ${err.message}`);
+          // Fallback to default narration
         }
       }
       
@@ -188,18 +183,10 @@ router.post('/process', async (req, res) => {
       const fileExtension = path.extname(file).toLowerCase();
       const fileName = path.basename(file, fileExtension);
       
-      console.log(`📄 Processing file: ${file} (${fileExtension})`);
-      
       if (fileExtension === '.pptx' || fileExtension === '.ppt') {
         // PPT/PPTX Processing: Convert to PDF first, then to images
         console.log(`📊 Processing PowerPoint: ${fileName}`);
-        
-        // Convert PPTX to PDF
-        console.log('🔄 Converting PPT to PDF...');
         const pdfPath = await convertPPTXtoPDF(absPath);
-        
-        // Convert PDF pages to images
-        console.log('🖼️ Converting PDF to images...');
         const pageImages = await convertPDFToImages(pdfPath);
         
         // Create slides and only pre-generate audio for the FIRST slide
@@ -219,23 +206,17 @@ router.post('/process', async (req, res) => {
           
           // Only pre-generate audio for the first slide during upload
           if (index === 0) {
-            console.log('🎵 Pre-generating audio for FIRST slide only...');
             const slideWithAudio = await preGenerateAudio(slideInfo, fileName, absPath);
             slides.push(slideWithAudio);
           } else {
-            // Add slides without audio - will be generated on-demand
-            console.log(`⏳ Slide ${index + 1} queued for lazy audio generation`);
-            slideInfo.audioStatus = 'pending'; // Mark as pending generation
+            slideInfo.audioStatus = 'pending';
             slides.push(slideInfo);
           }
         }
         
-      } else if (fileExtension === '.pdf') {
+              } else if (fileExtension === '.pdf') {
         // PDF Processing: Skip PPT to PDF conversion, go directly to images
-        console.log(`📑 Processing PDF directly: ${fileName}`);
-        
-        // Convert PDF pages to images directly
-        console.log('🖼️ Converting PDF to images...');
+        console.log(`📑 Processing PDF: ${fileName}`);
         const pageImages = await convertPDFToImages(absPath);
         
         // Create slides and only pre-generate audio for the FIRST slide
@@ -255,19 +236,15 @@ router.post('/process', async (req, res) => {
           
           // Only pre-generate audio for the first slide during upload
           if (index === 0) {
-            console.log('🎵 Pre-generating audio for FIRST slide only...');
             const slideWithAudio = await preGenerateAudio(slideInfo, fileName, absPath);
             slides.push(slideWithAudio);
           } else {
-            // Add slides without audio - will be generated on-demand
-            console.log(`⏳ Slide ${index + 1} queued for lazy audio generation`);
-            slideInfo.audioStatus = 'pending'; // Mark as pending generation
+            slideInfo.audioStatus = 'pending';
             slides.push(slideInfo);
           }
         }
       } else {
         // For other files (images, text, etc.), just show as image/text
-        console.log(`📄 Processing other file type: ${fileName} (${fileExtension})`);
         slides.push({
           id: slides.length + 1,
           image: file,
@@ -278,9 +255,6 @@ router.post('/process', async (req, res) => {
         });
       }
     }
-    // TESTING: Log processing summary
-    console.log('=== PROCESSING SUMMARY ===');
-    
     const processingStats = {
       totalSlides: slides.length,
       pptFiles: slides.filter(s => s.sourceType === 'ppt').length,
@@ -290,18 +264,9 @@ router.post('/process', async (req, res) => {
       slidesPendingAudio: slides.filter(s => s.audioStatus === 'pending').length
     };
     
-    console.log('Processing Statistics:');
-    console.log(`  📊 PowerPoint slides: ${processingStats.pptFiles}`);
-    console.log(`  📑 PDF slides: ${processingStats.pdfFiles}`);
-    console.log(`  📄 Other files: ${processingStats.otherFiles}`);
-    console.log(`  🎵 Slides with audio: ${processingStats.slidesWithAudio}`);
-    console.log(`  ⏳ Slides pending audio: ${processingStats.slidesPendingAudio}`);
-    
-    slides.forEach((slide, index) => {
-      console.log(`  Slide ${index + 1}: ${slide.sourceType} - ${slide.title} (${slide.audioUrl ? 'has audio' : 'pending audio'})`);
-    });
-    
-    console.log('=== END PROCESSING SUMMARY ===');
+    console.log('✅ Processed:', processingStats.totalSlides, 'slides |', 
+      processingStats.pptFiles, 'PPT |', processingStats.pdfFiles, 'PDF |', 
+      processingStats.slidesWithAudio, 'with audio');
     
     // Auto-index the presentation for conversational queries
     const presentationId = files[0].split('/').pop().split('-')[0] || 'presentation'; // Extract from filename

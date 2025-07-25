@@ -33,15 +33,9 @@ const upload = multer({
       'application/vnd.openxmlformats-officedocument.presentationml.presentation' // .pptx
     ];
     
-    console.log(`📁 File upload filter check: ${file.originalname} (${file.mimetype})`);
-    
     if (allowed.includes(file.mimetype)) {
-      const fileExtension = path.extname(file.originalname).toLowerCase();
-      console.log(`✅ File accepted: ${file.originalname} (${fileExtension})`);
       cb(null, true);
     } else {
-      console.log(`❌ File rejected: ${file.originalname} - Unsupported type: ${file.mimetype}`);
-      console.log(`Supported types: ${allowed.join(', ')}`);
       cb(new Error(`Unsupported file type: ${file.mimetype}. Supported: PPT, PPTX, PDF, Images, Text`));
     }
   }

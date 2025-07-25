@@ -78,14 +78,7 @@ export default function QuestionsPage() {
         const currentTranscript = event.results[0][0].transcript;
         setTranscript(currentTranscript);
         setCurrentQuestion(currentTranscript);
-        
-        // TESTING: Log speech recognition details
-        console.log('=== TESTING: SPEECH RECOGNITION ===');
-        console.log('Speech Recognition Result:', `"${currentTranscript}"`);
-        console.log('Transcript Length:', currentTranscript.length, 'characters');
-        console.log('Is Final Result:', event.results[0].isFinal);
-        console.log('Confidence Score:', event.results[0][0].confidence || 'Not available');
-        console.log('=== END SPEECH RECOGNITION ===');
+        console.log('🎤 Speech recognized:', `"${currentTranscript}"`);
       };
 
       speechRecognition.onend = () => {
@@ -132,24 +125,7 @@ export default function QuestionsPage() {
       };
 
       console.log('🎯 Initializing conversation session:', sessionId);
-      console.log('📋 Slide context:', slideContext);
-      
-      // TESTING: Log detailed slide information
-      console.log('=== TESTING: SLIDE CONTEXT DETAILS ===');
-      console.log('Presentation ID:', presentationId);
-      console.log('Presentation Title:', slideContext.title);
-      console.log('Total Slides:', slideContext.slides.length);
-      console.log('Full Text Length:', slideContext.fullText.length, 'characters');
-      
-      slideContext.slides.forEach((slide, index) => {
-        console.log(`--- SLIDE ${index + 1} ---`);
-        console.log('Title:', slide.title);
-        console.log('Content Length:', slide.content.length, 'characters');
-        console.log('Content Preview:', slide.content.substring(0, 100) + '...');
-        console.log('Has Image:', !!slide.imageUrl);
-      });
-      
-      console.log('=== END SLIDE CONTEXT DETAILS ===');
+      console.log('📋 Slide context available:', slideContext.slides.length, 'slides');
 
       const response = await fetch(`${API_BASE}/api/conversation/session/init`, {
         method: 'POST',
@@ -191,43 +167,12 @@ export default function QuestionsPage() {
     const questionId = `q-${Date.now()}`;
     const startTime = Date.now();
 
-    // TESTING: Log detailed question information
-    console.log('=== TESTING: NEW QUESTION SUBMITTED ===');
-    console.log('Question Number:', questions.length + 1);
-    console.log('Timestamp:', new Date().toLocaleString());
-    console.log('Session ID:', sessionId);
-    console.log('Question Text:', `"${questionText}"`);
-    console.log('Question Length:', questionText.length, 'characters');
-    console.log('Question Type:', questionText.endsWith('?') ? 'Interrogative' : 'Statement');
-    console.log('Input Method:', transcript ? 'Voice (Speech Recognition)' : 'Text (Typed)');
-    if (transcript) {
-      console.log('Speech Transcript:', `"${transcript}"`);
-    }
-    
-    // Log available slide context
-    if (slides && slides.length > 0) {
-      console.log('--- AVAILABLE SLIDE CONTEXT ---');
-      console.log('Total Slides Available:', slides.length);
-      slides.forEach((slide, index) => {
-        const content = slide.preGeneratedNarration || slide.text || slide.narration || slide.content || '';
-        console.log(`Slide ${index + 1}:`, {
-          title: slide.title || `Slide ${index + 1}`,
-          contentLength: content.length,
-          hasContent: content.length > 0,
-          contentPreview: content.substring(0, 50) + (content.length > 50 ? '...' : '')
-        });
-      });
-    } else {
-      console.log('--- NO SLIDE CONTEXT AVAILABLE ---');
-    }
-    
-    console.log('=== END QUESTION DETAILS ===');
+    console.log('🤔 Question submitted:', `"${questionText}"`, transcript ? '(voice)' : '(text)');
 
     try {
       console.log('📡 Sending chat message to API...');
 
-             // TESTING: Log the exact request being sent to the API
-       const requestPayload = {
+             const requestPayload = {
          message: questionText,
          sessionId,
          options: {
@@ -236,15 +181,6 @@ export default function QuestionsPage() {
            temperature: 0.7
          }
        };
-       
-       console.log('=== TESTING: API REQUEST PAYLOAD ===');
-       console.log('API Endpoint:', `${API_BASE}/api/conversation/chat`);
-       console.log('Request Method:', 'POST');
-       console.log('Request Headers:', { 'Content-Type': 'application/json' });
-       console.log('Request Payload:');
-       console.log(JSON.stringify(requestPayload, null, 2));
-       console.log('Payload Size:', JSON.stringify(requestPayload).length, 'bytes');
-       console.log('=== END API REQUEST PAYLOAD ===');
 
        const response = await fetch(`${API_BASE}/api/conversation/chat`, {
          method: 'POST',
@@ -260,37 +196,7 @@ export default function QuestionsPage() {
       }
 
       const result = await response.json();
-      console.log('✅ Chat response received from API');
-      
-      // TESTING: Log detailed response information
-      console.log('=== TESTING: AI RESPONSE DETAILS ===');
-      console.log('Response Success:', result.success);
-      console.log('AI Response Text:', `"${result.message}"`);
-      console.log('Response Length:', result.message?.length || 0, 'characters');
-      console.log('Detected Intent:', result.intent);
-      console.log('Intent Confidence:', Math.round((result.confidence || 0) * 100) + '%');
-      console.log('Response Time:', result.responseTime + 'ms');
-      console.log('Has Audio URL:', !!result.audioUrl);
-      if (result.audioUrl) {
-        console.log('Audio URL:', result.audioUrl);
-      }
-      
-      if (result.relevantSlides && result.relevantSlides.length > 0) {
-        console.log('--- RELEVANT SLIDES FOUND ---');
-        result.relevantSlides.forEach((slide, index) => {
-          console.log(`Relevant Slide ${index + 1}:`, {
-            slideIndex: slide.slideIndex,
-            title: slide.title,
-            relevanceScore: slide.relevanceScore
-          });
-        });
-      } else {
-        console.log('--- NO RELEVANT SLIDES FOUND ---');
-      }
-      
-      console.log('Conversation ID:', result.conversationId);
-      console.log('Session ID:', result.sessionId);
-      console.log('=== END AI RESPONSE DETAILS ===');
+      console.log('✅ AI Response:', result.intent, `(${Math.round((result.confidence || 0) * 100)}%)`, result.responseTime + 'ms');
 
       const newQuestion: Question = {
         id: questionId,
@@ -307,18 +213,6 @@ export default function QuestionsPage() {
       setQuestions(prev => [...prev, newQuestion]);
       setCurrentQuestion('');
       setTranscript('');
-      
-      // TESTING: Log updated conversation state
-      console.log('=== TESTING: CONVERSATION STATE UPDATE ===');
-      console.log('Total Questions in Conversation:', questions.length + 1);
-      console.log('Question Added to History:', {
-        questionNumber: questions.length + 1,
-        userInput: questionText,
-        intent: result.intent,
-        hasAudio: !!result.audioUrl,
-        relevantSlidesCount: result.relevantSlides?.length || 0
-      });
-      console.log('=== END CONVERSATION STATE UPDATE ===');
 
       // Update session info
       if (sessionInfo) {
@@ -329,34 +223,9 @@ export default function QuestionsPage() {
         } : null);
       }
 
-      // TESTING: Log context that will be sent with future questions
-      console.log('=== TESTING: UPDATED CONTEXT FOR FUTURE QUESTIONS ===');
+      // Log conversation context for debugging
       const updatedConversationHistory = [...questions, newQuestion];
-      console.log('Conversation History Length:', updatedConversationHistory.length);
-      console.log('Full Conversation Context:');
-      updatedConversationHistory.forEach((q, index) => {
-        console.log(`  Question ${index + 1}:`);
-        console.log(`    User: "${q.userInput}"`);
-        console.log(`    AI: "${q.aiResponse}"`);
-        console.log(`    Intent: ${q.intent} (${Math.round(q.confidence * 100)}%)`);
-        console.log(`    Relevant Slides: ${q.relevantSlides.map(s => s.title).join(', ') || 'None'}`);
-      });
-      
-      // Log what context will be available for the NEXT question
-      console.log('--- CONTEXT AVAILABLE FOR NEXT QUESTION ---');
-      console.log('Slide Context Summary:');
-      if (slides && slides.length > 0) {
-        slides.forEach((slide, index) => {
-          const content = slide.preGeneratedNarration || slide.text || slide.narration || slide.content || '';
-          console.log(`  Slide ${index + 1}: "${slide.title || `Slide ${index + 1}`}" (${content.length} chars)`);
-        });
-      }
-      console.log('Recent Conversation (Last 3 exchanges):');
-      const recentQuestions = updatedConversationHistory.slice(-3);
-      recentQuestions.forEach((q, index) => {
-        console.log(`  Exchange ${index + 1}: "${q.userInput}" → "${q.aiResponse.substring(0, 100)}..."`);
-      });
-      console.log('=== END UPDATED CONTEXT ===');
+      console.log('💬 Conversation context:', updatedConversationHistory.length, 'exchanges,', slides?.length || 0, 'slides available');
 
       // Auto-play audio if available
       if (result.audioUrl && audioRef.current) {
@@ -366,17 +235,7 @@ export default function QuestionsPage() {
       }
 
     } catch (error) {
-      console.error('❌ Question submission failed:', error);
-      
-      // TESTING: Log detailed error information
-      console.log('=== TESTING: ERROR DETAILS ===');
-      console.log('Error Type:', error instanceof Error ? 'Error Object' : typeof error);
-      console.log('Error Message:', error instanceof Error ? error.message : String(error));
-      console.log('Question That Failed:', `"${questionText}"`);
-      console.log('Session ID:', sessionId);
-      console.log('Current Questions Count:', questions.length);
-      console.log('=== END ERROR DETAILS ===');
-      
+      console.error('❌ Question failed:', error instanceof Error ? error.message : String(error));
       setError(error instanceof Error ? error.message : 'Failed to process question');
     } finally {
       setIsLoading(false);
@@ -385,59 +244,26 @@ export default function QuestionsPage() {
 
   const toggleMicrophone = () => {
     if (!recognition) {
-      console.log('=== TESTING: SPEECH RECOGNITION ERROR ===');
-      console.log('Speech Recognition Support:', 'Not Available');
-      console.log('Browser:', navigator.userAgent);
-      console.log('=== END SPEECH RECOGNITION ERROR ===');
       setError('Speech recognition not supported in this browser');
       return;
     }
 
-    console.log('=== TESTING: MICROPHONE TOGGLE ===');
-    console.log('Current State:', isListening ? 'Listening' : 'Not Listening');
-    console.log('Action:', isListening ? 'Stopping Recognition' : 'Starting Recognition');
-    console.log('Current Question:', currentQuestion);
-    console.log('Current Transcript:', transcript);
-
     if (isListening) {
       recognition.stop();
-      console.log('Speech Recognition Stopped');
     } else {
       setCurrentQuestion('');
       setTranscript('');
       recognition.start();
-      console.log('Speech Recognition Started');
     }
-    console.log('=== END MICROPHONE TOGGLE ===');
   };
 
   const playAudio = (audioUrl: string, questionId: string) => {
-    console.log('=== TESTING: AUDIO PLAYBACK ===');
-    console.log('Question ID:', questionId);
-    console.log('Audio URL:', audioUrl);
-    console.log('Full Audio URL:', `${API_BASE}${audioUrl}`);
-    console.log('Audio Element Available:', !!audioRef.current);
-    
     if (audioRef.current) {
       audioRef.current.src = `${API_BASE}${audioUrl}`;
       audioRef.current.play()
-        .then(() => {
-          console.log('✅ Audio playback started successfully');
-          setActiveAudio(questionId);
-        })
-        .catch((error) => {
-          console.error('❌ Audio playback failed:', error);
-          console.log('Audio Error Details:', {
-            error: error.message,
-            audioSrc: audioRef.current?.src,
-            audioReadyState: audioRef.current?.readyState,
-            audioNetworkState: audioRef.current?.networkState
-          });
-        });
-    } else {
-      console.error('❌ Audio element not available');
+        .then(() => setActiveAudio(questionId))
+        .catch((error) => console.error('❌ Audio playback failed:', error));
     }
-    console.log('=== END AUDIO PLAYBACK ===');
   };
 
   const navigateToSlide = (slideIndex: number) => {

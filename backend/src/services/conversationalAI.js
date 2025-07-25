@@ -114,34 +114,8 @@ class ConversationalAI {
       .map(h => `User: ${h.userInput}\nAssistant: ${h.response}`)
       .join('\n\n');
 
-    // TESTING: Log detailed context being sent to AI
-    console.log('=== TESTING: AI PROMPT CONTEXT GENERATION ===');
-    console.log('Intent:', intent);
-    console.log('User Input:', `"${userInput}"`);
-    console.log('Slide Context Available:', !!slideContext);
-    if (slideContext) {
-      console.log('Slide Context Details:');
-      console.log('  Presentation ID:', slideContext.presentationId);
-      console.log('  Title:', slideContext.title);
-      console.log('  Total Slides:', slideContext.slides?.length || 0);
-      console.log('  Full Text Length:', slideContext.fullText?.length || 0, 'characters');
-      if (slideContext.slides && slideContext.slides.length > 0) {
-        console.log('  Slide Summaries:');
-        slideContext.slides.forEach((slide, index) => {
-          console.log(`    Slide ${index + 1}: "${slide.title}" (${slide.content?.length || 0} chars)`);
-        });
-      }
-    }
-    console.log('Conversation History Length:', conversationHistory.length);
-    console.log('Recent History (Last 3):');
-    recentHistory.forEach((h, index) => {
-      console.log(`  Exchange ${index + 1}:`);
-      console.log(`    User: "${h.userInput}"`);
-      console.log(`    AI: "${h.response?.substring(0, 100)}${h.response?.length > 100 ? '...' : ''}"`);
-    });
-    console.log('History Text for AI:');
-    console.log(historyText || 'No recent history');
-    console.log('=== END AI PROMPT CONTEXT ===');
+    // Log context for debugging
+    console.log('🧠 Generating prompt:', intent, '|', slideContext?.slides?.length || 0, 'slides |', conversationHistory.length, 'history');
 
     const baseContext = `
 You are an AI assistant helping users understand a presentation. 
@@ -218,18 +192,8 @@ I'm not sure what you're asking for. Please rephrase your question or ask about 
         session.conversationHistory
       );
 
-      // TESTING: Log the complete prompt being sent to AI
-      console.log('=== TESTING: COMPLETE AI PROMPT ===');
-      console.log('Prompt Length:', prompt.length, 'characters');
-      console.log('Full Prompt:');
-      console.log('---START PROMPT---');
-      console.log(prompt);
-      console.log('---END PROMPT---');
-      console.log('AI Provider Options:', {
-        maxTokens: options.maxTokens || 500,
-        temperature: options.temperature || 0.7
-      });
-      console.log('=== END COMPLETE AI PROMPT ===');
+      // Log prompt for debugging
+      console.log('📝 AI Prompt ready:', prompt.length, 'chars');
 
       // Get AI response
       const aiResponse = await aiProvider.generateText(prompt, {
@@ -237,15 +201,7 @@ I'm not sure what you're asking for. Please rephrase your question or ask about 
         temperature: options.temperature || 0.7
       });
       
-      // TESTING: Log AI response received
-      console.log('=== TESTING: AI RESPONSE RECEIVED ===');
-      console.log('Response Length:', aiResponse?.length || 0, 'characters');
-      console.log('Response Preview:', aiResponse?.substring(0, 200) + (aiResponse?.length > 200 ? '...' : ''));
-      console.log('Full Response:');
-      console.log('---START AI RESPONSE---');
-      console.log(aiResponse);
-      console.log('---END AI RESPONSE---');
-      console.log('=== END AI RESPONSE RECEIVED ===');
+      console.log('🤖 AI Response received:', aiResponse?.length || 0, 'chars');
 
       // Generate audio if requested
       let audioUrl = null;
@@ -274,33 +230,7 @@ I'm not sure what you're asking for. Please rephrase your question or ask about 
       };
 
       session.conversationHistory.push(conversationEntry);
-      
-      // TESTING: Log conversation history update
-      console.log('=== TESTING: CONVERSATION HISTORY UPDATE ===');
-      console.log('New Entry Added:');
-      console.log('  Timestamp:', conversationEntry.timestamp);
-      console.log('  User Input:', `"${conversationEntry.userInput}"`);
-      console.log('  AI Response:', `"${conversationEntry.response}"`);
-      console.log('  Intent:', conversationEntry.intent);
-      console.log('  Confidence:', Math.round(conversationEntry.confidence * 100) + '%');
-      console.log('  Relevant Slides Count:', conversationEntry.relevantSlides.length);
-      console.log('  Response Time:', conversationEntry.responseTime + 'ms');
-      console.log('  Has Audio:', !!conversationEntry.audioUrl);
-      
-      console.log('Total Conversation History:', session.conversationHistory.length, 'entries');
-      console.log('Complete Conversation History:');
-      session.conversationHistory.forEach((entry, index) => {
-        console.log(`  Entry ${index + 1}:`);
-        console.log(`    User: "${entry.userInput}"`);
-        console.log(`    AI: "${entry.response.substring(0, 80)}${entry.response.length > 80 ? '...' : ''}"`);
-        console.log(`    Intent: ${entry.intent} (${Math.round(entry.confidence * 100)}%)`);
-      });
-      
-      console.log('Context Available for Next Question:');
-      console.log('  Slide Context: Available');
-      console.log('  Conversation History:', session.conversationHistory.length, 'entries');
-      console.log('  Last 3 entries will be included in next prompt');
-      console.log('=== END CONVERSATION HISTORY UPDATE ===');
+      console.log('💾 Conversation updated:', session.conversationHistory.length, 'entries');
 
       // Update metrics
       const responseTime = Date.now() - startTime;

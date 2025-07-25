@@ -35,47 +35,8 @@ router.post('/chat', async (req, res) => {
 
     // Initialize or update session with slide context if provided
     if (slideContext) {
-      console.log('=== TESTING: UPDATING SLIDE CONTEXT IN CHAT ===');
-      console.log('Session ID:', sessionId);
-      console.log('Slide Context Provided:', !!slideContext);
-      if (slideContext) {
-        console.log('Slide Context Details:');
-        console.log('  Presentation ID:', slideContext.presentationId);
-        console.log('  Slides Count:', slideContext.slides?.length || 0);
-        console.log('  Full Text Length:', slideContext.fullText?.length || 0);
-      }
-      console.log('=== END SLIDE CONTEXT UPDATE ===');
       conversationalAI.updateSlideContext(sessionId, slideContext);
     }
-    
-    // TESTING: Log current session state before generating response
-    console.log('=== TESTING: SESSION STATE BEFORE RESPONSE ===');
-    const currentSession = conversationalAI.conversations.get(sessionId);
-    if (currentSession) {
-      console.log('Session Found:', true);
-      console.log('Session Details:');
-      console.log('  Session ID:', currentSession.sessionId);
-      console.log('  Created At:', currentSession.createdAt);
-      console.log('  Last Active:', currentSession.lastActive);
-      console.log('  Conversation History Length:', currentSession.conversationHistory.length);
-      console.log('  Has Slide Context:', !!currentSession.slideContext);
-      if (currentSession.slideContext) {
-        console.log('  Slide Context Summary:');
-        console.log('    Presentation ID:', currentSession.slideContext.presentationId);
-        console.log('    Slides Count:', currentSession.slideContext.slides?.length || 0);
-        console.log('    Full Text Available:', !!currentSession.slideContext.fullText);
-      }
-      console.log('  Recent History (for AI context):');
-      const recentHistory = currentSession.conversationHistory.slice(-3);
-      recentHistory.forEach((entry, index) => {
-        console.log(`    ${index + 1}. User: "${entry.userInput}"`);
-        console.log(`       AI: "${entry.response.substring(0, 50)}..."`);
-      });
-    } else {
-      console.log('Session Found:', false);
-      console.log('This will create a new session');
-    }
-    console.log('=== END SESSION STATE ===');
 
     // Generate response
     const result = await conversationalAI.generateResponse(sessionId, message, {
