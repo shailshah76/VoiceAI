@@ -132,10 +132,14 @@ const Upload = () => {
           <div className="text-center">
             <UploadIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">
-              Drag & drop your slides here
+              Drag & drop your presentation here
             </h3>
             <p className="text-muted-foreground mb-4">
-              Support for images, PDFs, or text files (Max 2 files)
+              Support for <strong>PowerPoint (.ppt, .pptx)</strong>, <strong>PDF</strong>, images, or text files (Max 2 files)
+            </p>
+            <p className="text-xs text-muted-foreground mb-4">
+              📊 PowerPoint files will be converted to images automatically<br/>
+              📑 PDF files will be processed directly without conversion
             </p>
             <Button 
               variant="outline" 
@@ -149,7 +153,7 @@ const Upload = () => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,.pdf,.txt,.ppt,.pptx"
+              accept=".pdf,.ppt,.pptx,image/*,.txt"
               onChange={handleFileChange}
               className="hidden"
             />

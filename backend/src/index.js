@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import uploadRouter from './routes/upload.js';
 import slidesRouter from './routes/slides.js';
 import aiRouter from './routes/ai.js';
+import conversationRouter from './routes/conversation.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -26,21 +27,31 @@ app.get('/api/health', (req, res) => {
 app.get('/api/tts-status', (req, res) => {
   const hasPlayAI = !!process.env.PLAYAI_API_KEY;
   const hasGemini = !!process.env.GEMINI_API_KEY;
+  const hasGroq = !!process.env.GROQ_API_KEY;
   
   res.json({
     services: {
-      playai: {
-        available: hasPlayAI,
-        keyLength: hasPlayAI ? process.env.PLAYAI_API_KEY.length : 0,
-        keyStart: hasPlayAI ? process.env.PLAYAI_API_KEY.substring(0, 8) + '...' : 'missing'
+      groqPlayAI: {
+        available: hasGroq,
+        keyLength: hasGroq ? process.env.GROQ_API_KEY.length : 0,
+        keyStart: hasGroq ? process.env.GROQ_API_KEY.substring(0, 8) + '...' : 'missing',
+        status: hasGroq ? 'Primary TTS (via Groq)' : 'Not configured'
       },
       gemini: {
         available: hasGemini,
         keyLength: hasGemini ? process.env.GEMINI_API_KEY.length : 0,
-        keyStart: hasGemini ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'missing'
+        keyStart: hasGemini ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'missing',
+        status: hasGemini ? 'Fallback TTS' : 'Not configured'
+      },
+      directPlayAI: {
+        available: hasPlayAI,
+        keyLength: hasPlayAI ? process.env.PLAYAI_API_KEY.length : 0,
+        keyStart: hasPlayAI ? process.env.PLAYAI_API_KEY.substring(0, 8) + '...' : 'missing',
+        status: 'Deprecated - using Groq PlayAI instead'
       }
     },
-    recommendation: !hasPlayAI ? 'Add PLAYAI_API_KEY to .env file' : 'TTS services configured'
+    currentIssue: hasGroq ? 'Groq PlayAI may have rate limits. Check console for rate limit messages.' : 'No Groq API key configured',
+    recommendation: !hasGroq ? 'Add GROQ_API_KEY to .env file for PlayAI TTS via Groq' : 'TTS services configured correctly'
   });
 });
 
@@ -122,6 +133,7 @@ app.get('/uploads/audio/:filename', (req, res) => {
 app.use('/api/upload', uploadRouter);
 app.use('/api/slides', slidesRouter);
 app.use('/api', aiRouter);
+app.use('/api/conversation', conversationRouter);
 
 // Test endpoint for audio file validation
 app.get('/api/test-audio/:filename', (req, res) => {

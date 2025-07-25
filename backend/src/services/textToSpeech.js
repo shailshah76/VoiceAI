@@ -212,12 +212,29 @@ class TextToSpeechService {
         serviceName = 'Groq/PlayAI';
       } catch (error) {
         console.error('❌ Groq/PlayAI failed:', error.message);
+        
+        // Check if it's a rate limit error
+        if (error.message.includes('429') || error.message.includes('rate limit')) {
+          console.warn('⚠️ Groq PlayAI rate limit reached. Consider upgrading plan or trying again later.');
+        }
       }
     }
 
-    // Fallback to test audio
+    // Try Gemini TTS as fallback
     if (!audioBuffer) {
-      console.log('🎵 Using test beep fallback');
+      try {
+        console.log('🔄 Trying Gemini TTS as fallback...');
+        audioBuffer = await this.testGeminiLiveTTS(cleanText);
+        serviceName = 'Gemini Live TTS';
+      } catch (error) {
+        console.error('❌ Gemini TTS fallback failed:', error.message);
+      }
+    }
+
+    // Final fallback to test audio
+    if (!audioBuffer) {
+      console.log('🎵 Using test beep fallback - all TTS services failed');
+      console.log('💡 Rate limit info: Groq PlayAI resets daily. Try again in a few hours.');
       audioBuffer = this.createTestAudio(cleanText.length);
       serviceName = 'TestBeep';
     }

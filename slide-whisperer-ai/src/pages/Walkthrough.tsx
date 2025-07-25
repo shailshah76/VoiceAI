@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Mic, MicOff, Play, Pause, Volume2 } from "lucide-react";
+import { Play, Pause, Volume2, ArrowLeft, ArrowRight, MessageCircle, CheckCircle } from "lucide-react";
 import sampleSlide1 from "@/assets/sample-slide-1.jpg";
 import sampleSlide2 from "@/assets/sample-slide-2.jpg";
 
@@ -21,84 +21,54 @@ const sampleSlides = [
   }
 ];
 
-const API_BASE = "http://localhost:7122"; // Match backend port
+const API_BASE = "http://localhost:7122";
 
 const Walkthrough = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const initialSlides = (location.state && location.state.slides && Array.isArray(location.state.slides) && location.state.slides.length > 0)
-    ? location.state.slides
+  const { slides: locationSlides, initialSlide = 0, returnToQuestions = false, presentationId: locationPresentationId } = location.state || {};
+  
+  const initialSlides = (locationSlides && Array.isArray(locationSlides) && locationSlides.length > 0)
+    ? locationSlides
     : sampleSlides;
   
-  // Use state to track slides with their audio status
   const [slides, setSlides] = useState(initialSlides);
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const [isListening, setIsListening] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(initialSlide);
   const [isNarrating, setIsNarrating] = useState(false);
-  const [userQuestion, setUserQuestion] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [narrationText, setNarrationText] = useState("");
-  const [conversationMode, setConversationMode] = useState(false);
-  const [conversationResponse, setConversationResponse] = useState("");
-  const [suggestedSlide, setSuggestedSlide] = useState<any>(null);
-  const [presentationId, setPresentationId] = useState("");
-  const [recognition, setRecognition] = useState<any>(null);
+  const [presentationId, setPresentationId] = useState(locationPresentationId || "");
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const slide = slides[currentSlide];
-
-  // Initialize speech recognition
-  useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognitionInstance = new SpeechRecognition();
-      
-      recognitionInstance.continuous = false;
-      recognitionInstance.interimResults = false;
-      recognitionInstance.lang = 'en-US';
-      
-      recognitionInstance.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        console.log('🎤 User said:', transcript);
-        setUserQuestion(transcript);
-        handleConversationQuestion(transcript);
-      };
-      
-      recognitionInstance.onerror = (event: any) => {
-        console.error('🎤 Speech recognition error:', event.error);
-        setIsListening(false);
-      };
-      
-      recognitionInstance.onend = () => {
-        setIsListening(false);
-      };
-      
-      setRecognition(recognitionInstance);
-    }
-  }, []);
+  const isLastSlide = currentSlide === slides.length - 1;
 
   // Extract presentation ID from slides
   useEffect(() => {
-    if (slides.length > 0 && slides[0].pptName) {
-      setPresentationId(slides[0].pptName);
+    if (slides.length > 0 && !presentationId) {
+      // Create consistent presentationId from slide data
+      const id = slides[0].pptName || 
+                 slides[0].title || 
+                 `presentation-${slides.length}-slides`;
+      
+      console.log('🎯 Setting presentationId:', id);
+      setPresentationId(id);
     }
-  }, [slides]);
+  }, [slides, presentationId]);
 
   // Background audio generation for next slide  
   const preGenerateNextSlideAudio = async (nextSlideIndex: number) => {
-    if (nextSlideIndex >= slides.length) return; // No next slide
+    if (nextSlideIndex >= slides.length) return;
     
     const nextSlide = slides[nextSlideIndex];
     
-    // Skip if audio already exists or is being generated
     if (nextSlide.preGeneratedAudio || nextSlide.audioStatus === 'generating') {
       console.log(`⚡ Slide ${nextSlideIndex + 1} audio already available or generating`);
       return;
     }
     
-    console.log(`🔄 Starting HIGH PRIORITY background generation for slide ${nextSlideIndex + 1}...`);
+    console.log(`🔄 Starting background generation for slide ${nextSlideIndex + 1}...`);
     
-    // Mark as generating
     setSlides(prevSlides => {
       const newSlides = [...prevSlides];
       newSlides[nextSlideIndex] = { ...newSlides[nextSlideIndex], audioStatus: 'generating' };
@@ -119,7 +89,7 @@ const Walkthrough = () => {
             image: nextSlide.image,
             pageNumber: nextSlideIndex + 1,
             totalPages: slides.length,
-            pptName: nextSlide.pptName // Include PPT name for deterministic filenames
+            pptName: nextSlide.pptName
           }
         }),
       });
@@ -128,7 +98,6 @@ const Walkthrough = () => {
         const data = await response.json();
         console.log(`✅ Background audio generated for slide ${nextSlideIndex + 1}`);
         
-        // Update the slide with pre-generated audio
         setSlides(prevSlides => {
           const newSlides = [...prevSlides];
           newSlides[nextSlideIndex] = {
@@ -157,307 +126,139 @@ const Walkthrough = () => {
     }
   };
 
-  // Handle conversational questions
-  const handleConversationQuestion = async (question: string) => {
-    if (!question.trim() || !presentationId) return;
-    
-    console.log(`🗣️ Processing question: "${question}"`);
-    setConversationMode(true);
-    setConversationResponse("Thinking...");
-    
-    try {
-      const response = await fetch(`${API_BASE}/api/conversation/ask`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question: question,
-          presentationId: presentationId,
-          currentSlideNumber: currentSlide + 1,
-          slides: slides
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('🤖 Conversation response:', data);
-        
-        setConversationResponse(data.response);
-        setSuggestedSlide(data.suggestedSlide);
-        
-        // Play the response audio
-        if (data.audioUrl) {
-          const fullAudioUrl = `${API_BASE}${data.audioUrl}`;
-          
-          // Stop current audio
-          if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-          }
-          
-          const audio = new Audio(fullAudioUrl);
-          audioRef.current = audio;
-          
-          audio.onloadeddata = () => {
-            console.log('🤖 Playing conversation response...');
-            audio.play().catch(err => {
-              console.error('Failed to play conversation response:', err);
-            });
-          };
-          
-          audio.onended = () => {
-            console.log('🤖 Conversation response finished');
-            // Optionally navigate to suggested slide
-            if (data.suggestedSlide && data.suggestedSlide.confidence > 0.7) {
-              setTimeout(() => {
-                navigateToSlide(data.suggestedSlide.slideNumber - 1);
-              }, 1000);
-            }
-          };
-        }
-      } else {
-        setConversationResponse("Sorry, I couldn't process your question. Please try again.");
-      }
-    } catch (error) {
-      console.error('❌ Conversation error:', error);
-      setConversationResponse("Sorry, there was an error processing your question.");
-    }
-  };
-
   const navigateToSlide = (slideIndex: number) => {
     if (slideIndex >= 0 && slideIndex < slides.length) {
       setCurrentSlide(slideIndex);
-    }
-  };
-
-  const startListening = () => {
-    if (recognition && !isListening) {
-      setUserQuestion("");
-      setConversationResponse("");
-      setSuggestedSlide(null);
-      setIsListening(true);
-      recognition.start();
-    }
-  };
-
-  const stopListening = () => {
-    if (recognition && isListening) {
-      recognition.stop();
-      setIsListening(false);
-    }
-  };
-
-  useEffect(() => {
-    // Auto-start narration when slide loads
-    startNarration();
-    
-    // Pre-generate audio for next slide in background IMMEDIATELY
-    const nextSlideIndex = currentSlide + 1;
-    if (nextSlideIndex < slides.length) {
-      console.log(`🚀 Immediately starting background audio generation for slide ${nextSlideIndex + 1}`);
-      // Start immediately, don't wait
-      preGenerateNextSlideAudio(nextSlideIndex);
       
-      // Also pre-generate the slide after next if we have time (lower priority)
-      const afterNextIndex = currentSlide + 2;
-      if (afterNextIndex < slides.length) {
-        setTimeout(() => {
-          console.log(`📋 Low priority: starting background generation for slide ${afterNextIndex + 1}`);
-          preGenerateNextSlideAudio(afterNextIndex);
-        }, 2000); // Give 2 seconds for the immediate next slide to start
+      // Pre-generate audio for next slide in background
+      if (slideIndex + 1 < slides.length) {
+        preGenerateNextSlideAudio(slideIndex + 1);
       }
     }
+  };
+
+  const handlePrevSlide = () => {
+    if (currentSlide > 0) {
+      navigateToSlide(currentSlide - 1);
+    }
+  };
+
+  const handleNextSlide = () => {
+    if (currentSlide < slides.length - 1) {
+      navigateToSlide(currentSlide + 1);
+    }
+  };
+
+  const handleQuestionsClick = () => {
+    const finalPresentationId = presentationId || 
+                               slides[0]?.pptName || 
+                               slides[0]?.title || 
+                               `presentation-${slides.length}-slides`;
     
-    // Cleanup function
-    return () => {
-      console.log('🧹 Slide changing - stopping any playing audio');
-      // Stop audio when changing slides to prevent overlap
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-    };
-  }, [currentSlide]);
+    console.log('🚀 Navigating to questions with presentationId:', finalPresentationId);
+    
+    navigate("/questions", { 
+      state: { 
+        slides, 
+        presentationId: finalPresentationId
+      } 
+    });
+  };
+
+  const handleComplete = () => {
+    navigate("/complete");
+  };
 
   const startNarration = async () => {
-    // Always stop any existing audio first to prevent overlap
+    console.log(`🎵 Starting narration for slide ${currentSlide + 1}`);
+    setIsNarrating(true);
+
+    // Stop any currently playing audio
     if (audioRef.current) {
-      console.log('🛑 Stopping any existing audio to prevent overlap');
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-      audioRef.current = null;
     }
-    
-    setIsNarrating(true);
-    setAudioUrl(null);
-    setNarrationText("");
-    
-    // Check if this slide has pre-generated audio
-    if (slide.preGeneratedAudio && slide.preGeneratedNarration) {
-      console.log('⚡ Using pre-generated audio for instant playback');
-      setNarrationText(slide.preGeneratedNarration);
-      const fullAudioUrl = `${API_BASE}${slide.preGeneratedAudio}`;
-      setAudioUrl(fullAudioUrl);
+
+    let audioSource = null;
+    let narration = "";
+
+    // Check if audio is pre-generated
+    if (slide.preGeneratedAudio) {
+      console.log(`⚡ Using pre-generated audio for slide ${currentSlide + 1}`);
+      audioSource = `${API_BASE}${slide.preGeneratedAudio}`;
+      narration = slide.preGeneratedNarration || slide.text || slide.narration || `Slide ${currentSlide + 1}`;
+    } else {
+      console.log(`🔄 Generating audio on-demand for slide ${currentSlide + 1}`);
       
-      // Audio already stopped at start of function
-      
-      const audio = new Audio(fullAudioUrl);
-      audioRef.current = audio;
-      
-      // Add comprehensive audio event logging
-      audio.addEventListener('loadstart', () => console.log('🎵 Audio load started'));
-      audio.addEventListener('loadeddata', () => console.log('🎵 Audio data loaded'));
-      audio.addEventListener('loadedmetadata', () => console.log(`🎵 Audio metadata loaded - Duration: ${audio.duration}s`));
-      audio.addEventListener('canplay', () => console.log('🎵 Audio can start playing'));
-      audio.addEventListener('canplaythrough', () => console.log('🎵 Audio can play through completely'));
-      audio.addEventListener('play', () => console.log('▶️ Audio started playing'));
-      audio.addEventListener('pause', () => console.log('⏸️ Audio paused'));
-      audio.addEventListener('ended', () => console.log('🏁 Audio ended naturally'));
-      audio.addEventListener('abort', () => console.log('🚫 Audio aborted'));
-      audio.addEventListener('stalled', () => console.log('⏳ Audio stalled'));
-      audio.addEventListener('suspend', () => console.log('⏸️ Audio suspended'));
-      audio.addEventListener('emptied', () => console.log('🗑️ Audio emptied'));
-      audio.addEventListener('timeupdate', () => {
-        if (audio.currentTime > 0) {
-          console.log(`⏰ Audio progress: ${audio.currentTime.toFixed(1)}s / ${audio.duration?.toFixed(1) || '?'}s`);
+      try {
+        const response = await fetch(`${API_BASE}/api/narrate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            slide: {
+              id: slide.id,
+              title: slide.title,
+              text: slide.text || slide.narration,
+              image: slide.image,
+              pageNumber: currentSlide + 1,
+              totalPages: slides.length,
+              pptName: slide.pptName
+            }
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          audioSource = `${API_BASE}${data.audioUrl}`;
+          narration = data.narration;
+          console.log(`✅ Generated audio for slide ${currentSlide + 1}: ${data.audioUrl}`);
+        } else {
+          console.error(`❌ Failed to generate audio for slide ${currentSlide + 1}`);
+          setIsNarrating(false);
+          return;
         }
-      });
-      
+      } catch (error) {
+        console.error(`❌ Error generating audio for slide ${currentSlide + 1}:`, error);
+        setIsNarrating(false);
+        return;
+      }
+    }
+
+    // Play the audio
+    if (audioSource) {
+      const audio = new Audio(audioSource);
+      audioRef.current = audio;
+      setAudioUrl(audioSource);
+      setNarrationText(narration);
+
       audio.onloadeddata = () => {
-        console.log('⚡ Pre-generated audio loaded, playing...');
+        console.log(`🎵 Playing audio for slide ${currentSlide + 1}`);
         audio.play().catch(err => {
-          console.error('Failed to play pre-generated audio:', err);
+          console.error('Failed to play audio:', err);
           setIsNarrating(false);
         });
       };
-      
+
       audio.onended = () => {
-        console.log('⚡ Pre-generated audio finished playing completely');
+        console.log(`✅ Finished narration for slide ${currentSlide + 1}`);
         setIsNarrating(false);
       };
-      
+
       audio.onerror = (err) => {
-        console.error('⚡ Pre-generated audio error:', err);
+        console.error('Audio playback error:', err);
         setIsNarrating(false);
       };
-      
-      return; // Exit early, no need to make API call
-    }
-    
-    // Fallback: Generate on-demand (slower)
-    try {
-      console.log('🐌 No pre-generated audio, requesting on-demand narration for slide:', slide);
-      const response = await fetch(`${API_BASE}/api/narrate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          slide: {
-            id: slide.id,
-            title: slide.title,
-            text: slide.text || slide.narration,
-            image: slide.image,
-            pageNumber: currentSlide + 1,
-            totalPages: slides.length,
-            pptName: slide.pptName, // Include PPT name for deterministic filenames
-            // Pass pre-generated audio info if available
-            preGeneratedAudio: slide.preGeneratedAudio,
-            preGeneratedNarration: slide.preGeneratedNarration
-          }
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Narration response:', data);
-        setNarrationText(data.narration);
-        
-        if (data.audioUrl) {
-          const fullAudioUrl = `${API_BASE}${data.audioUrl}`;
-          setAudioUrl(fullAudioUrl);
-          
-          // Audio already stopped at start of function
-          
-          const audio = new Audio(fullAudioUrl);
-          audioRef.current = audio;
-          
-          // Add comprehensive audio event logging for fallback audio too
-          audio.addEventListener('loadstart', () => console.log('🎵 Fallback audio load started'));
-          audio.addEventListener('loadeddata', () => console.log('🎵 Fallback audio data loaded'));
-          audio.addEventListener('loadedmetadata', () => console.log(`🎵 Fallback audio metadata loaded - Duration: ${audio.duration}s`));
-          audio.addEventListener('canplay', () => console.log('🎵 Fallback audio can start playing'));
-          audio.addEventListener('canplaythrough', () => console.log('🎵 Fallback audio can play through completely'));
-          audio.addEventListener('play', () => console.log('▶️ Fallback audio started playing'));
-          audio.addEventListener('pause', () => console.log('⏸️ Fallback audio paused'));
-          audio.addEventListener('ended', () => console.log('🏁 Fallback audio ended naturally'));
-          audio.addEventListener('abort', () => console.log('🚫 Fallback audio aborted'));
-          audio.addEventListener('stalled', () => console.log('⏳ Fallback audio stalled'));
-          audio.addEventListener('suspend', () => console.log('⏸️ Fallback audio suspended'));
-          audio.addEventListener('emptied', () => console.log('🗑️ Fallback audio emptied'));
-          audio.addEventListener('timeupdate', () => {
-            if (audio.currentTime > 0) {
-              console.log(`⏰ Fallback audio progress: ${audio.currentTime.toFixed(1)}s / ${audio.duration?.toFixed(1) || '?'}s`);
-            }
-          });
-          
-          audio.onloadeddata = () => {
-            console.log('Audio loaded, playing...');
-            audio.play().catch(err => {
-              console.error('Failed to play audio:', err);
-              setIsNarrating(false);
-            });
-          };
-          
-          audio.oncanplaythrough = () => {
-            console.log('Audio can play through, attempting to play...');
-            // Try to play, but if it fails due to autoplay policy, that's ok
-            audio.play().catch(err => {
-              console.warn('Autoplay blocked by browser policy. User interaction needed:', err);
-              // Don't set isNarrating to false here - let user manually play
-            });
-          };
-          
-          audio.onended = () => {
-            console.log('Audio finished playing completely');
-            setIsNarrating(false);
-          };
-          
-          audio.onerror = (err) => {
-            console.error('Audio error:', err);
-            setIsNarrating(false);
-          };
-        } else {
-          // No audio available, just show text
-          setTimeout(() => {
-            setIsNarrating(false);
-          }, 3000);
-        }
-      } else {
-        console.error('Failed to get narration:', response.statusText);
-        setIsNarrating(false);
-      }
-    } catch (error) {
-      console.error('Error requesting narration:', error);
-      setIsNarrating(false);
     }
   };
 
-  const toggleListening = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
+  const stopNarration = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
     }
-  };
-
-  const nextSlide = () => {
-    if (currentSlide < slides.length - 1) {
-      setCurrentSlide(currentSlide + 1);
-    } else {
-      navigate("/complete");
-    }
+    setIsNarrating(false);
   };
 
   return (
@@ -471,173 +272,144 @@ const Walkthrough = () => {
             </div>
             <div className="w-16 h-1 bg-success rounded-full"></div>
             <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-primary-foreground font-semibold text-sm">
-              2
+              {currentSlide + 1}
             </div>
             <div className="w-16 h-1 bg-muted rounded-full"></div>
             <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center text-muted-foreground font-semibold text-sm">
-              3
+              ?
             </div>
           </div>
-          <p className="text-muted-foreground">Step 2 of 3 - Voice Walkthrough</p>
-        </div>
-
-        {/* Slide counter */}
-        <div className="text-center mb-6">
-          <span className="bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium">
+          <p className="text-muted-foreground">
             Slide {currentSlide + 1} of {slides.length}
-          </span>
+            {isLastSlide && " - Ready for questions!"}
+          </p>
         </div>
 
-        {/* Main slide area */}
+        {/* Main slide display */}
         <Card className="mb-8 overflow-hidden shadow-soft">
-          <div className="aspect-video relative bg-gradient-card">
+          <div className="relative">
             <img 
-              src={slide.image && typeof slide.image === 'string' && slide.image.startsWith('/uploads/') ? (API_BASE + slide.image) : slide.image} 
+              src={slide.image?.startsWith('/') ? `${API_BASE}${slide.image}` : slide.image} 
               alt={slide.title}
-              className="w-full h-full object-cover"
+              className="w-full h-96 object-cover"
             />
-            {isNarrating && (
-              <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                <div className="bg-white/90 rounded-lg p-4 flex items-center space-x-3 max-w-md">
-                  <Volume2 className="w-5 h-5 text-primary animate-pulse" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium">Narrating...</div>
-                    {narrationText && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {narrationText.substring(0, 100)}...
-                      </div>
-                    )}
-
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+            <div className="absolute bottom-4 left-4 text-white">
+              <h2 className="text-2xl font-bold mb-2">{slide.title}</h2>
+            </div>
           </div>
+          
+          {isNarrating && (
+            <div className="bg-primary/5 px-6 py-4 border-t">
+              <div className="flex items-center justify-center space-x-3">
+                <Volume2 className="w-5 h-5 text-primary animate-pulse" />
+                <span className="text-primary font-medium">AI is narrating this slide...</span>
+              </div>
+              {narrationText && (
+                <p className="text-center text-sm text-muted-foreground mt-2 italic">
+                  "{narrationText.length > 150 ? narrationText.substring(0, 150) + '...' : narrationText}"
+                </p>
+              )}
+            </div>
+          )}
         </Card>
 
-        {/* Controls */}
-        <div className="flex flex-col items-center space-y-6">
-          {/* Narration control */}
-          <Button 
-            variant={isNarrating ? "soft" : "secondary"}
-            size="lg"
-            onClick={startNarration}
-            disabled={isNarrating}
-          >
-            {isNarrating ? (
-              <>
-                <Pause className="w-5 h-5 mr-2" />
-                Narrating...
-              </>
-            ) : (
-              <>
-                <Play className="w-5 h-5 mr-2" />
-                Replay Narration
-              </>
-            )}
-          </Button>
-
-          {/* Voice interaction */}
+        {/* Control buttons */}
+        <div className="flex flex-col space-y-6 animate-slide-up">
+          {/* Narration controls */}
           <div className="text-center">
-            <Button
-              variant="voice"
-              size="voice"
-              onClick={toggleListening}
-              className={isListening ? "animate-pulse-gentle" : ""}
-            >
-              {isListening ? (
-                <MicOff className="w-8 h-8" />
-              ) : (
-                <Mic className="w-8 h-8" />
-              )}
-            </Button>
-            <p className="text-sm text-muted-foreground mt-3">
-              {isListening 
-                ? "Listening... Ask your question!" 
-                : "Tap to ask a question about this slide"
-              }
-            </p>
-            {userQuestion && (
-              <div className="mt-4 p-3 bg-accent/20 rounded-lg">
-                <p className="text-sm italic">"{userQuestion}"</p>
-              </div>
+            {!isNarrating ? (
+              <Button 
+                variant="voice" 
+                size="voice"
+                onClick={startNarration}
+                className="shadow-glow hover:shadow-xl"
+              >
+                <Play className="w-6 h-6" />
+              </Button>
+            ) : (
+              <Button 
+                variant="destructive" 
+                size="voice"
+                onClick={stopNarration}
+              >
+                <Pause className="w-6 h-6" />
+              </Button>
             )}
+            <p className="text-sm text-muted-foreground mt-2">
+              {!isNarrating ? "Start narration" : "Stop narration"}
+            </p>
           </div>
 
-          {/* Conversation Interface */}
-          {conversationMode && (
-            <Card className="w-full max-w-2xl p-6 bg-blue-50 border-blue-200 animate-fade-in">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-blue-700">🤖 AI Assistant</span>
-                </div>
-                
-                {userQuestion && (
-                  <div className="bg-white p-4 rounded-lg border shadow-sm">
-                    <p className="text-sm text-gray-600 mb-1">You asked:</p>
-                    <p className="font-medium text-gray-800">"{userQuestion}"</p>
-                  </div>
-                )}
-                
-                {conversationResponse && (
-                  <div className="bg-blue-100 p-4 rounded-lg border border-blue-200">
-                    <p className="text-sm leading-relaxed">{conversationResponse}</p>
-                  </div>
-                )}
-                
-                {suggestedSlide && (
-                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-green-700 mb-1">
-                          💡 Relevant content found on Slide {suggestedSlide.slideNumber}
-                        </p>
-                        <p className="text-xs text-green-600 mb-2">{suggestedSlide.reason}</p>
-                        <p className="text-xs text-gray-500">
-                          Confidence: {Math.round((suggestedSlide.confidence || 0) * 100)}%
-                        </p>
-                      </div>
-                      <Button 
-                        size="sm" 
-                        onClick={() => navigateToSlide(suggestedSlide.slideNumber - 1)}
-                        className="bg-green-600 hover:bg-green-700 text-white"
-                      >
-                        Go to Slide
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="flex justify-center">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => setConversationMode(false)}
-                    className="text-gray-600"
-                  >
-                    Close Conversation
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Navigation */}
-          <div className="flex space-x-4">
+          {/* Navigation and Questions */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Button 
               variant="outline" 
-              onClick={() => navigate("/upload")}
+              onClick={handlePrevSlide}
+              disabled={currentSlide === 0}
+              className="flex items-center justify-center"
             >
-              ← Back
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Previous
             </Button>
+            
+            {isLastSlide ? (
+              <Button 
+                variant="hero" 
+                onClick={handleQuestionsClick}
+                className="flex items-center justify-center"
+              >
+                <MessageCircle className="w-4 h-4 mr-2" />
+                Ask Questions
+              </Button>
+            ) : (
+              <Button 
+                variant="secondary" 
+                onClick={handleNextSlide}
+                className="flex items-center justify-center"
+              >
+                Next Slide
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            )}
+            
             <Button 
-              variant="secondary" 
-              onClick={nextSlide}
-              size="lg"
+              variant="outline" 
+              onClick={handleComplete}
+              className="flex items-center justify-center"
             >
-              {currentSlide < slides.length - 1 ? "Next Slide" : "Finish"} →
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Finish
             </Button>
+          </div>
+
+          {/* Back to questions option */}
+          {returnToQuestions && (
+            <div className="text-center">
+              <Button 
+                variant="ghost" 
+                onClick={handleQuestionsClick}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ← Back to Questions
+              </Button>
+            </div>
+          )}
+
+          {/* Slide navigation dots */}
+          <div className="flex justify-center space-x-2">
+            {slides.map((_, index) => (
+              <button
+                key={index}
+                onClick={() => navigateToSlide(index)}
+                className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                  index === currentSlide 
+                    ? 'bg-primary scale-125' 
+                    : 'bg-muted hover:bg-muted-foreground/50'
+                }`}
+                aria-label={`Go to slide ${index + 1}`}
+              />
+            ))}
           </div>
         </div>
       </div>
@@ -645,4 +417,4 @@ const Walkthrough = () => {
   );
 };
 
-export default Walkthrough;
+export default Walkthrough; 

@@ -109,6 +109,8 @@ class AIProviderService {
    */
   async generateWithGroq(prompt, options = {}) {
     try {
+      console.log('🚀 Calling Groq API with model:', options.model || 'llama-3.1-8b-instant');
+      
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -116,21 +118,31 @@ class AIProviderService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: options.model || 'moonshotai/kimi-k2-instruct', // Moonshot AI Kimi K2 Instruct
+          model: options.model || 'llama-3.1-8b-instant', // Use Llama 3.1 8B Instant (current Groq model)
           messages: [
             { role: 'user', content: prompt }
           ],
-          max_tokens: options.maxTokens || 2000,
+          max_tokens: options.maxTokens || 1000,
           temperature: options.temperature || 0.7
         })
       });
 
+      console.log('📡 Groq response status:', response.status);
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorText = await response.text();
+        console.error('❌ Groq API error response:', errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          throw new Error(`Groq API error: ${response.status} - ${errorText}`);
+        }
         throw new Error(`Groq API error: ${errorData.error?.message || response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('✅ Groq response received');
       return data.choices[0].message.content;
     } catch (error) {
       console.error('❌ Groq generation failed:', error.message);

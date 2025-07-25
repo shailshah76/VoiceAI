@@ -185,14 +185,21 @@ router.post('/process', async (req, res) => {
   try {
     for (const file of files) {
       const absPath = path.join(process.cwd(), file);
-      if (file.endsWith('.pptx') || file.endsWith('.ppt')) {
-        // Extract PPT name for deterministic audio filenames
-        const pptName = path.basename(file, path.extname(file));
-        console.log(`📄 Processing PPT: ${pptName}`);
+      const fileExtension = path.extname(file).toLowerCase();
+      const fileName = path.basename(file, fileExtension);
+      
+      console.log(`📄 Processing file: ${file} (${fileExtension})`);
+      
+      if (fileExtension === '.pptx' || fileExtension === '.ppt') {
+        // PPT/PPTX Processing: Convert to PDF first, then to images
+        console.log(`📊 Processing PowerPoint: ${fileName}`);
         
         // Convert PPTX to PDF
+        console.log('🔄 Converting PPT to PDF...');
         const pdfPath = await convertPPTXtoPDF(absPath);
+        
         // Convert PDF pages to images
+        console.log('🖼️ Converting PDF to images...');
         const pageImages = await convertPDFToImages(pdfPath);
         
         // Create slides and only pre-generate audio for the FIRST slide
@@ -205,13 +212,51 @@ router.post('/process', async (req, res) => {
             text: `Page ${page.pageNumber} of presentation`,
             pageNumber: page.pageNumber,
             totalPages: pageImages.length,
-            pptName: pptName // Store PPT name for audio generation
+            pptName: fileName, // Store filename for audio generation
+            sourceType: 'ppt',
+            originalFile: file
           };
           
           // Only pre-generate audio for the first slide during upload
           if (index === 0) {
             console.log('🎵 Pre-generating audio for FIRST slide only...');
-            const slideWithAudio = await preGenerateAudio(slideInfo, pptName, absPath);
+            const slideWithAudio = await preGenerateAudio(slideInfo, fileName, absPath);
+            slides.push(slideWithAudio);
+          } else {
+            // Add slides without audio - will be generated on-demand
+            console.log(`⏳ Slide ${index + 1} queued for lazy audio generation`);
+            slideInfo.audioStatus = 'pending'; // Mark as pending generation
+            slides.push(slideInfo);
+          }
+        }
+        
+      } else if (fileExtension === '.pdf') {
+        // PDF Processing: Skip PPT to PDF conversion, go directly to images
+        console.log(`📑 Processing PDF directly: ${fileName}`);
+        
+        // Convert PDF pages to images directly
+        console.log('🖼️ Converting PDF to images...');
+        const pageImages = await convertPDFToImages(absPath);
+        
+        // Create slides and only pre-generate audio for the FIRST slide
+        for (let index = 0; index < pageImages.length; index++) {
+          const page = pageImages[index];
+          const slideInfo = {
+            id: slides.length + 1,
+            image: page.imagePath,
+            title: `Slide ${index + 1}`,
+            text: `Page ${page.pageNumber} of PDF`,
+            pageNumber: page.pageNumber,
+            totalPages: pageImages.length,
+            pptName: fileName, // Store filename for audio generation (reusing same field for consistency)
+            sourceType: 'pdf',
+            originalFile: file
+          };
+          
+          // Only pre-generate audio for the first slide during upload
+          if (index === 0) {
+            console.log('🎵 Pre-generating audio for FIRST slide only...');
+            const slideWithAudio = await preGenerateAudio(slideInfo, fileName, absPath);
             slides.push(slideWithAudio);
           } else {
             // Add slides without audio - will be generated on-demand
@@ -221,15 +266,43 @@ router.post('/process', async (req, res) => {
           }
         }
       } else {
-        // For other files, just show as image/text
+        // For other files (images, text, etc.), just show as image/text
+        console.log(`📄 Processing other file type: ${fileName} (${fileExtension})`);
         slides.push({
           id: slides.length + 1,
           image: file,
           title: `Slide ${slides.length + 1}`,
-          text: `Extracted text for slide ${slides.length + 1}`
+          text: `Extracted text for slide ${slides.length + 1}`,
+          sourceType: 'other',
+          originalFile: file
         });
       }
     }
+    // TESTING: Log processing summary
+    console.log('=== PROCESSING SUMMARY ===');
+    
+    const processingStats = {
+      totalSlides: slides.length,
+      pptFiles: slides.filter(s => s.sourceType === 'ppt').length,
+      pdfFiles: slides.filter(s => s.sourceType === 'pdf').length,
+      otherFiles: slides.filter(s => s.sourceType === 'other').length,
+      slidesWithAudio: slides.filter(s => s.audioUrl).length,
+      slidesPendingAudio: slides.filter(s => s.audioStatus === 'pending').length
+    };
+    
+    console.log('Processing Statistics:');
+    console.log(`  📊 PowerPoint slides: ${processingStats.pptFiles}`);
+    console.log(`  📑 PDF slides: ${processingStats.pdfFiles}`);
+    console.log(`  📄 Other files: ${processingStats.otherFiles}`);
+    console.log(`  🎵 Slides with audio: ${processingStats.slidesWithAudio}`);
+    console.log(`  ⏳ Slides pending audio: ${processingStats.slidesPendingAudio}`);
+    
+    slides.forEach((slide, index) => {
+      console.log(`  Slide ${index + 1}: ${slide.sourceType} - ${slide.title} (${slide.audioUrl ? 'has audio' : 'pending audio'})`);
+    });
+    
+    console.log('=== END PROCESSING SUMMARY ===');
+    
     // Auto-index the presentation for conversational queries
     const presentationId = files[0].split('/').pop().split('-')[0] || 'presentation'; // Extract from filename
     try {
@@ -243,7 +316,8 @@ router.post('/process', async (req, res) => {
     res.json({ 
       slides,
       presentationId: presentationId,
-      conversationReady: true 
+      conversationReady: true,
+      processingStats 
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

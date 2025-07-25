@@ -8,11 +8,311 @@ import fs from 'fs';
 
 const router = express.Router();
 
+// In-memory storage for presentation contexts (in production, use a database)
+const presentationContexts = new Map();
+
+// POST /api/conversation/store - Store slide context for RAG
+router.post('/conversation/store', async (req, res) => {
+  try {
+    const { presentationId, slides } = req.body;
+    
+    if (!presentationId || !slides || !Array.isArray(slides)) {
+      return res.status(400).json({ error: 'presentationId and slides array required' });
+    }
+
+    console.log(`📚 Storing context for presentation: ${presentationId}`);
+    console.log(`📊 Received ${slides.length} slides for indexing`);
+
+    // Create comprehensive context from all slides with better content extraction
+    const processedSlides = slides.map((slide, index) => {
+      const slideContent = slide.preGeneratedNarration || slide.text || slide.narration || slide.content || '';
+      const slideTitle = slide.title || `Slide ${index + 1}`;
+      
+      console.log(`📄 Slide ${index + 1}: "${slideTitle}" - Content: ${slideContent.substring(0, 100)}...`);
+      
+      return {
+        slideNumber: index + 1,
+        title: slideTitle,
+        content: slideContent,
+        originalSlide: slide, // Keep original slide data
+        totalSlides: slides.length
+      };
+    });
+
+    // Create rich full-text context
+    const fullText = processedSlides.map(slide => {
+      const content = slide.content || 'No content available';
+      return `=== SLIDE ${slide.slideNumber}: ${slide.title} ===\n${content}\n`;
+    }).join('\n');
+
+    const context = {
+      presentationId,
+      timestamp: Date.now(),
+      slides: processedSlides,
+      fullText,
+      summary: `This presentation contains ${slides.length} slides. Topics covered: ${
+        processedSlides.map(slide => slide.title).filter(title => title && !title.includes('Slide ')).join(', ') || 'Various presentation topics'
+      }`,
+      rawSlides: slides // Keep original slides for reference
+    };
+
+    // Store context both in memory and log for debugging
+    presentationContexts.set(presentationId, context);
+    
+    // Also save to file for persistence (optional)
+    try {
+      const fs = await import('fs');
+      const contextFile = path.join(process.cwd(), 'uploads', `context-${presentationId}.json`);
+      await fs.promises.writeFile(contextFile, JSON.stringify(context, null, 2));
+      console.log(`💾 Context also saved to file: ${contextFile}`);
+    } catch (fileError) {
+      console.warn('⚠️ Could not save context to file:', fileError.message);
+    }
+    
+    console.log(`✅ Stored context for presentation: ${presentationId}`);
+    console.log(`📝 Full text length: ${fullText.length} characters`);
+    console.log(`🎯 Summary: ${context.summary}`);
+
+    res.json({ 
+      success: true, 
+      presentationId,
+      slidesStored: slides.length,
+      contextLength: fullText.length,
+      summary: context.summary,
+      message: 'Presentation context stored successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error storing presentation context:', error);
+    res.status(500).json({ error: 'Failed to store presentation context' });
+  }
+});
+
+// POST /api/conversation/ask - RAG-based Q&A
+router.post('/conversation/ask', async (req, res) => {
+  try {
+    const { question, presentationId } = req.body;
+    
+    if (!question || !presentationId) {
+      return res.status(400).json({ error: 'question and presentationId required' });
+    }
+
+    // Debug: Log all stored contexts
+    console.log('📚 Available presentation contexts:', Array.from(presentationContexts.keys()));
+    console.log('🔍 Looking for presentationId:', presentationId);
+    
+    // Retrieve stored context
+    let context = presentationContexts.get(presentationId);
+    if (!context) {
+      console.log('❌ Context not found. Available contexts:', Array.from(presentationContexts.keys()));
+      
+      // Try to load from file as backup
+      try {
+        const fs = await import('fs');
+        const contextFile = path.join(process.cwd(), 'uploads', `context-${presentationId}.json`);
+        if (await fs.promises.access(contextFile).then(() => true).catch(() => false)) {
+          const fileContent = await fs.promises.readFile(contextFile, 'utf-8');
+          context = JSON.parse(fileContent);
+          presentationContexts.set(presentationId, context);
+          console.log('✅ Loaded context from file backup');
+        }
+      } catch (fileError) {
+        console.warn('⚠️ Could not load context from file:', fileError.message);
+      }
+      
+      // If still no context, return error
+      if (!context) {
+        return res.status(404).json({ 
+          error: 'Presentation context not found. Please view the presentation first.',
+          availableContexts: Array.from(presentationContexts.keys()),
+          requestedId: presentationId
+        });
+      }
+    }
+
+    console.log(`🤖 Processing question: "${question}" for presentation: ${presentationId}`);
+    console.log(`📚 Using context with ${context.slides.length} slides, ${context.fullText.length} characters`);
+
+    // Create RAG prompt with full presentation context
+    const ragPrompt = `You are an AI assistant helping users understand a presentation. You must answer based ONLY on the provided presentation content.
+
+PRESENTATION SUMMARY:
+${context.summary}
+
+COMPLETE SLIDE CONTENT:
+${context.fullText}
+
+USER QUESTION: ${question}
+
+CRITICAL INSTRUCTIONS:
+1. Answer ONLY using information from the slide content provided above
+2. If the question asks about something not in the slides, say "That topic isn't covered in this presentation"
+3. If you reference information, mention which slide it comes from (e.g., "As shown in Slide 2...")
+4. Be conversational but accurate
+5. Keep responses to 2-3 sentences maximum
+6. Use natural language suitable for speech
+
+Your answer based on this specific presentation:`;
+
+    // Get AI response with fallback
+    console.log('🧠 Sending prompt to AI provider...');
+    console.log('📝 Prompt length:', ragPrompt.length);
+    
+    let aiResponse;
+    try {
+      aiResponse = await aiProvider.generateText(ragPrompt, {
+        maxTokens: 300,
+        temperature: 0.7
+      });
+      console.log('✅ AI response received:', aiResponse.substring(0, 100) + '...');
+    } catch (aiError) {
+      console.error('❌ Primary AI provider failed:', aiError.message);
+      
+      // Try fallback to Gemini
+      try {
+        console.log('🔄 Trying Gemini fallback...');
+        aiProvider.setProvider('gemini');
+        aiResponse = await aiProvider.generateText(ragPrompt, {
+          maxTokens: 300,
+          temperature: 0.7
+        });
+        console.log('✅ Gemini fallback response received');
+      } catch (fallbackError) {
+        console.error('❌ Fallback AI also failed:', fallbackError.message);
+        throw new Error(`All AI providers failed. Primary: ${aiError.message}, Fallback: ${fallbackError.message}`);
+      }
+    }
+
+    // Generate TTS for the response
+    const audioFilename = `conversation-${presentationId}-${Date.now()}`;
+    const audioPath = path.join(process.cwd(), 'uploads', 'audio', `${audioFilename}.wav`);
+    
+    try {
+      await textToSpeechService.textToSpeech(aiResponse, audioPath);
+      console.log(`🎵 Generated conversation audio: ${audioFilename}.wav`);
+    } catch (ttsError) {
+      console.error('❌ TTS generation failed for conversation:', ttsError);
+      // Continue without audio
+    }
+
+    // Find most relevant slide (simple keyword matching)
+    let relevantSlide = null;
+    const questionLower = question.toLowerCase();
+    const slideScores = context.slides.map(slide => {
+      const slideText = `${slide.title} ${slide.content} ${slide.preGeneratedNarration}`.toLowerCase();
+      const keywords = questionLower.split(' ').filter(word => word.length > 3);
+      const score = keywords.reduce((acc, keyword) => {
+        return acc + (slideText.includes(keyword) ? 1 : 0);
+      }, 0);
+      return { slide, score };
+    });
+
+    const bestMatch = slideScores.reduce((best, current) => 
+      current.score > best.score ? current : best
+    );
+
+    if (bestMatch.score > 0) {
+      relevantSlide = {
+        slideNumber: bestMatch.slide.slideNumber,
+        title: bestMatch.slide.title,
+        confidence: Math.min(bestMatch.score / 3, 1) // Normalize to 0-1
+      };
+    }
+
+    res.json({
+      response: aiResponse,
+      audioUrl: fs.existsSync(audioPath) ? `/uploads/audio/${audioFilename}.wav` : null,
+      relevantSlide,
+      contextUsed: {
+        presentationId,
+        totalSlides: context.slides.length,
+        timestamp: context.timestamp
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error processing conversation:', error);
+    res.status(500).json({ 
+      error: 'Failed to process question',
+      response: "I'm sorry, I encountered an error while processing your question. Please try again."
+    });
+  }
+});
+
+// GET /api/debug-contexts - List all stored contexts
+router.get('/debug-contexts', (req, res) => {
+  const contexts = Array.from(presentationContexts.entries()).map(([id, context]) => ({
+    presentationId: id,
+    slidesCount: context.slides?.length || 0,
+    timestamp: context.timestamp,
+    summary: context.summary,
+    textLength: context.fullText?.length || 0
+  }));
+  
+  res.json({
+    totalContexts: contexts.length,
+    contexts
+  });
+});
+
+// GET /api/test-ai - Test AI provider
+router.get('/test-ai', async (req, res) => {
+  try {
+    console.log('🧪 Testing AI provider...');
+    const testPrompt = "Say hello and tell me you're working correctly in exactly one sentence.";
+    
+    const response = await aiProvider.generateText(testPrompt, {
+      maxTokens: 100,
+      temperature: 0.7
+    });
+    
+    res.json({
+      success: true,
+      provider: aiProvider.currentProvider,
+      prompt: testPrompt,
+      response: response,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ AI test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      provider: aiProvider.currentProvider
+    });
+  }
+});
+
+// GET /api/conversation/context/:presentationId - Get stored context
+router.get('/conversation/context/:presentationId', async (req, res) => {
+  try {
+    const { presentationId } = req.params;
+    const context = presentationContexts.get(presentationId);
+    
+    if (!context) {
+      return res.status(404).json({ error: 'Presentation context not found' });
+    }
+
+    res.json({
+      presentationId,
+      slidesCount: context.slides.length,
+      timestamp: context.timestamp,
+      summary: context.summary,
+      available: true
+    });
+
+  } catch (error) {
+    console.error('❌ Error retrieving context:', error);
+    res.status(500).json({ error: 'Failed to retrieve context' });
+  }
+});
+
 // POST /api/cleanup - Delete all files in uploads folder
 router.post('/cleanup', async (req, res) => {
   try {
     const uploadsDir = path.join(process.cwd(), 'uploads');
-    
+   
     if (!fs.existsSync(uploadsDir)) {
       return res.json({ message: 'Uploads directory does not exist', filesDeleted: 0 });
     }
@@ -26,31 +326,38 @@ router.post('/cleanup', async (req, res) => {
       const stat = fs.statSync(itemPath);
 
       if (stat.isDirectory()) {
-        // Recursively delete directory and its contents
-        fs.rmSync(itemPath, { recursive: true, force: true });
-        deletedCount++;
-        console.log(`Deleted directory: ${item}`);
-      } else if (stat.isFile()) {
+        // Recursively delete directory contents
+        const deleteDirectory = (dirPath) => {
+          const files = fs.readdirSync(dirPath);
+          for (const file of files) {
+            const filePath = path.join(dirPath, file);
+            const fileStat = fs.statSync(filePath);
+            if (fileStat.isDirectory()) {
+              deleteDirectory(filePath);
+            } else {
+              fs.unlinkSync(filePath);
+              deletedCount++;
+            }
+          }
+          fs.rmdirSync(dirPath);
+        };
+
+        deleteDirectory(itemPath);
+      } else {
         // Delete file
         fs.unlinkSync(itemPath);
         deletedCount++;
-        console.log(`Deleted file: ${item}`);
       }
     }
 
-    console.log(`🧹 Cleanup completed: ${deletedCount} items deleted from uploads folder`);
-    res.json({ 
-      message: 'Cleanup completed successfully', 
-      filesDeleted: deletedCount,
-      timestamp: new Date().toISOString()
-    });
+    // Clear presentation contexts from memory
+    presentationContexts.clear();
+    console.log('🧹 Cleared all presentation contexts from memory');
 
+    res.json({ message: 'Cleanup completed successfully', filesDeleted: deletedCount });
   } catch (error) {
-    console.error('❌ Cleanup failed:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to cleanup uploads folder', 
-      details: error.message 
-    });
+    console.error('❌ Cleanup error:', error);
+    res.status(500).json({ error: 'Cleanup failed', details: error.message });
   }
 });
 
@@ -308,83 +615,6 @@ router.post('/pregenerate-audio', async (req, res) => {
       success: false,
       error: error.message,
       message: `Failed to generate audio for slide ${slide.pageNumber}`
-    });
-  }
-});
-
-// POST /api/conversation/ask
-// Conversational AI endpoint for asking questions about slides
-router.post('/conversation/ask', async (req, res) => {
-  const { question, presentationId, currentSlideNumber, slides } = req.body;
-  
-  if (!question || !presentationId) {
-    return res.status(400).json({ error: 'Question and presentationId are required' });
-  }
-  
-  console.log(`🗣️ User asked: "${question}" for presentation ${presentationId}`);
-  
-  try {
-    // Index presentation if not already indexed
-    if (!slideContextService.presentations.has(presentationId)) {
-      console.log('📚 Indexing presentation for conversation...');
-      await slideContextService.indexPresentation(presentationId, slides);
-    }
-    
-    // Find relevant slides for the question
-    const searchResult = await slideContextService.findRelevantSlides(
-      presentationId, 
-      question, 
-      currentSlideNumber
-    );
-    
-    if (searchResult.relevantSlides.length === 0) {
-      return res.json({
-        response: "I couldn't find specific information about that in the current presentation. Could you rephrase your question or ask about a different topic?",
-        suggestedSlide: null,
-        audioUrl: null,
-        relevantSlides: []
-      });
-    }
-    
-    // Get the most relevant slide
-    const mostRelevant = searchResult.relevantSlides[0];
-    const targetSlide = mostRelevant.slide;
-    
-    // Generate conversational response
-    const conversationalResponse = await slideContextService.generateSlideResponse(
-      targetSlide, 
-      question,
-      `Context: ${searchResult.suggestedResponse}`
-    );
-    
-    console.log(`🤖 Generated response: ${conversationalResponse.substring(0, 100)}...`);
-    
-    // Generate audio for the response
-    const audioFilename = `conversation-${presentationId}-${Date.now()}`;
-    const audioUrl = await textToSpeechService.textToSpeechFile(conversationalResponse, audioFilename);
-    
-    res.json({
-      response: conversationalResponse,
-      suggestedSlide: {
-        slideNumber: targetSlide.pageNumber,
-        title: targetSlide.title,
-        reason: mostRelevant.reason,
-        confidence: mostRelevant.score
-      },
-      audioUrl: audioUrl,
-      relevantSlides: searchResult.relevantSlides.slice(0, 3).map(item => ({
-        slideNumber: item.slide.pageNumber,
-        title: item.slide.title,
-        reason: item.reason,
-        confidence: item.score
-      }))
-    });
-    
-  } catch (error) {
-    console.error('❌ Conversation failed:', error.message);
-    res.status(500).json({
-      error: 'Failed to process your question',
-      message: error.message
     });
   }
 });

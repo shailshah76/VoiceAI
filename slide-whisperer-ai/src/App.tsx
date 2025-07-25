@@ -9,6 +9,7 @@ import Walkthrough from "./pages/Walkthrough";
 import Response from "./pages/Response";
 import Complete from "./pages/Complete";
 import NotFound from "./pages/NotFound";
+import QuestionsPage from "./pages/QuestionsPage";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/upload" element={<Upload />} />
           <Route path="/walkthrough" element={<Walkthrough />} />
           <Route path="/response" element={<Response />} />
+          <Route path="/questions" element={<QuestionsPage />} />
           <Route path="/complete" element={<Complete />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
