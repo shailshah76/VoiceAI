@@ -49,8 +49,6 @@ export default function QuestionsPage() {
   const [recognition, setRecognition] = useState<any>(null);
   const [transcript, setTranscript] = useState('');
   const [microphonePermission, setMicrophonePermission] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
-  const [networkRetryCount, setNetworkRetryCount] = useState(0);
-  const [isRetrying, setIsRetrying] = useState(false);
 
   // UI state
   const [activeAudio, setActiveAudio] = useState<string | null>(null);
@@ -110,31 +108,44 @@ export default function QuestionsPage() {
         }
 
         const currentTranscript = finalTranscript || interimTranscript;
+        
+        // Always update the ref and state immediately
         interimTranscriptRef.current = currentTranscript;
         setTranscript(currentTranscript);
         setCurrentQuestion(currentTranscript);
         
-        console.log('🎤 Speech recognized:', `"${currentTranscript}"`);
+        console.log('🎤 Speech recognized:', `"${currentTranscript}"${finalTranscript ? ' (FINAL)' : ' (interim)'}`);
+        console.log('🔍 Debug - interimTranscriptRef.current:', `"${interimTranscriptRef.current}"`);
       };
 
       speechRecognition.onend = () => {
         console.log('🎤 Speech recognition ended');
+        console.log('🔍 Debug - Final transcript in ref:', `"${interimTranscriptRef.current}"`);
+        
         setIsListening(false);
         
-        // Auto-submit if we have a final transcript
+        // Get transcript from ref
         const finalTranscript = interimTranscriptRef.current.trim();
-        if (finalTranscript) {
-          console.log('📝 Auto-submitting transcript:', finalTranscript);
-          setTimeout(() => {
-            handleSubmitQuestion();
-          }, 500);
+        
+        console.log('🔍 Debug - Will auto-submit:', finalTranscript.length >= 2, 'Transcript:', `"${finalTranscript}"`);
+        
+        if (finalTranscript && finalTranscript.length >= 2) {
+          console.log('🚀 AUTO-SUBMITTING NOW with transcript:', finalTranscript);
+          
+          // Update UI state and submit directly with transcript
+          setCurrentQuestion(finalTranscript);
+          handleSubmitQuestion(finalTranscript); // Pass transcript directly
+        } else {
+          console.log('❌ No meaningful transcript to auto-submit:', `"${finalTranscript}"`);
+          if (finalTranscript) {
+            setCurrentQuestion(finalTranscript);
+          }
         }
       };
 
       speechRecognition.onerror = (event: any) => {
         console.error('❌ Speech recognition error:', event.error);
         setIsListening(false);
-        setIsRetrying(false);
         
         let errorMessage;
         switch (event.error) {
@@ -146,30 +157,7 @@ export default function QuestionsPage() {
             errorMessage = 'No speech detected. Please speak clearly and try again.';
             break;
           case 'network':
-            // Try to retry network errors automatically
-            if (networkRetryCount < 3) {
-              setIsRetrying(true);
-              const retryDelay = Math.pow(2, networkRetryCount) * 1000; // Exponential backoff
-              console.log(`🔄 Network error, retrying in ${retryDelay}ms (attempt ${networkRetryCount + 1}/3)`);
-              
-              setTimeout(() => {
-                setNetworkRetryCount(prev => prev + 1);
-                setIsRetrying(false);
-                if (recognition) {
-                  try {
-                    recognition.start();
-                  } catch (e) {
-                    console.error('❌ Retry failed:', e);
-                    setError('Network connection unstable. Please check your internet and try again.');
-                  }
-                }
-              }, retryDelay);
-              
-              errorMessage = `Network error (retrying in ${Math.round(retryDelay/1000)}s...)`;
-            } else {
-              setNetworkRetryCount(0);
-              errorMessage = 'Network connection failed after 3 attempts. Please check your internet connection or try typing your question.';
-            }
+            errorMessage = 'Network connection failed. Speech recognition requires internet. Please check your connection or type your question.';
             break;
           case 'service-not-allowed':
             errorMessage = 'Speech recognition service blocked. Please check your browser settings or try a different browser.';
@@ -183,9 +171,9 @@ export default function QuestionsPage() {
           
         setError(errorMessage);
         
-        // Auto-clear non-critical errors (except permission and persistent network issues)
-        if (event.error !== 'not-allowed' && networkRetryCount === 0) {
-          setTimeout(() => setError(null), 8000);
+        // Auto-clear non-critical errors
+        if (event.error !== 'not-allowed') {
+          setTimeout(() => setError(null), 5000);
         }
       };
 
@@ -255,8 +243,8 @@ export default function QuestionsPage() {
     }
   };
 
-  const handleSubmitQuestion = async () => {
-    const questionText = currentQuestion.trim();
+  const handleSubmitQuestion = async (questionOverride?: string) => {
+    const questionText = (questionOverride || currentQuestion).trim();
     if (!questionText || isLoading) return;
 
     setIsLoading(true);
@@ -341,7 +329,7 @@ export default function QuestionsPage() {
     if (isListening) {
       console.log('🛑 Stopping speech recognition');
       if (recognition) {
-        recognition.stop();
+        recognition.stop(); // This will trigger onend which handles auto-submit
       }
       setIsListening(false);
     } else {
@@ -366,7 +354,6 @@ export default function QuestionsPage() {
       setTranscript('');
       interimTranscriptRef.current = '';
       setError(null);
-      setNetworkRetryCount(0); // Reset retry count for new session
       
       try {
         recognition.start();
@@ -631,7 +618,7 @@ export default function QuestionsPage() {
                 microphonePermission === 'denied' 
                   ? 'Microphone access denied - check browser settings'
                   : isListening 
-                    ? 'Stop recording' 
+                    ? 'Stop recording and auto-submit' 
                     : 'Start voice input'
               }
             >
@@ -650,21 +637,13 @@ export default function QuestionsPage() {
           {isListening && (
             <div className="mt-2 p-2 bg-blue-50 rounded-md">
               <p className="text-sm text-blue-600 font-medium">
-                🎤 Listening... Speak now!
+                🎤 Listening... Speak now! (Will auto-submit when you stop)
               </p>
               {transcript && (
                 <p className="text-sm text-gray-600 mt-1">
                   Current: "{transcript}"
                 </p>
               )}
-            </div>
-          )}
-          
-          {isRetrying && (
-            <div className="mt-2 p-2 bg-yellow-50 rounded-md">
-              <p className="text-sm text-yellow-600 font-medium">
-                🔄 Network issue detected, retrying speech recognition...
-              </p>
             </div>
           )}
           
