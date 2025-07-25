@@ -342,7 +342,7 @@ const Walkthrough = () => {
           </div>
 
           {/* Navigation and Questions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex flex-col md:flex-row justify-center items-center gap-4">
             <Button 
               variant="outline" 
               onClick={handlePrevSlide}
@@ -352,7 +352,6 @@ const Walkthrough = () => {
               <ArrowLeft className="w-4 h-4 mr-2" />
               Previous
             </Button>
-            
             {isLastSlide ? (
               <Button 
                 variant="hero" 
@@ -372,15 +371,6 @@ const Walkthrough = () => {
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             )}
-            
-            <Button 
-              variant="outline" 
-              onClick={handleComplete}
-              className="flex items-center justify-center"
-            >
-              <CheckCircle className="w-4 h-4 mr-2" />
-              Finish
-            </Button>
           </div>
 
           {/* Back to questions option */}

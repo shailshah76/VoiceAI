@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Mic, MicOff, Send, ArrowLeft, Volume2, Bot, User, Brain, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, Send, ArrowLeft, Volume2, Bot, User, Brain, MessageSquare, CheckCircle } from 'lucide-react';
 
 const API_BASE = 'http://localhost:7122';
 
@@ -625,7 +625,7 @@ export default function QuestionsPage() {
               {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </Button>
             <Button 
-              onClick={handleSubmitQuestion}
+              onClick={() => handleSubmitQuestion()}
               disabled={!currentQuestion.trim() || isLoading}
               className="flex items-center gap-2"
             >
@@ -654,6 +654,19 @@ export default function QuestionsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Finish Button */}
+      <div className="flex justify-center my-8">
+        <Button 
+          variant="hero" 
+          size="xl"
+          onClick={() => navigate("/complete")}
+          className="flex items-center justify-center"
+        >
+          <CheckCircle className="w-5 h-5 mr-2" />
+          Finish
+        </Button>
+      </div>
 
       {/* Hidden audio element */}
       <audio
