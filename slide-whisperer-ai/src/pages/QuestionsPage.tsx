@@ -48,6 +48,9 @@ export default function QuestionsPage() {
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<any>(null);
   const [transcript, setTranscript] = useState('');
+  const [microphonePermission, setMicrophonePermission] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
+  const [networkRetryCount, setNetworkRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // UI state
   const [activeAudio, setActiveAudio] = useState<string | null>(null);
@@ -55,29 +58,62 @@ export default function QuestionsPage() {
 
   const questionsEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const interimTranscriptRef = useRef('');
 
   // Initialize conversation session
   useEffect(() => {
     initializeSession();
+    initializeSpeechRecognition();
   }, []);
 
-  // Initialize speech recognition
-  useEffect(() => {
-    if ('webkitSpeechRecognition' in window) {
-      const speechRecognition = new (window as any).webkitSpeechRecognition();
+  const initializeSpeechRecognition = async () => {
+    // Check if speech recognition is supported
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      setError('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
+    try {
+      // Request microphone permissions first
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // Stop the stream, we just needed permission
+      setMicrophonePermission('granted');
+      console.log('🎤 Microphone permission granted');
+
+      // Initialize speech recognition
+      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      const speechRecognition = new SpeechRecognition();
+      
       speechRecognition.continuous = false;
       speechRecognition.interimResults = true;
       speechRecognition.lang = 'en-US';
+      speechRecognition.maxAlternatives = 1;
 
       speechRecognition.onstart = () => {
         console.log('🎤 Speech recognition started');
         setIsListening(true);
+        setError(null);
+        interimTranscriptRef.current = '';
       };
 
       speechRecognition.onresult = (event: any) => {
-        const currentTranscript = event.results[0][0].transcript;
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        const currentTranscript = finalTranscript || interimTranscript;
+        interimTranscriptRef.current = currentTranscript;
         setTranscript(currentTranscript);
         setCurrentQuestion(currentTranscript);
+        
         console.log('🎤 Speech recognized:', `"${currentTranscript}"`);
       };
 
@@ -85,8 +121,10 @@ export default function QuestionsPage() {
         console.log('🎤 Speech recognition ended');
         setIsListening(false);
         
-        // Auto-submit if we have a transcript
-        if (transcript.trim()) {
+        // Auto-submit if we have a final transcript
+        const finalTranscript = interimTranscriptRef.current.trim();
+        if (finalTranscript) {
+          console.log('📝 Auto-submitting transcript:', finalTranscript);
           setTimeout(() => {
             handleSubmitQuestion();
           }, 500);
@@ -96,11 +134,70 @@ export default function QuestionsPage() {
       speechRecognition.onerror = (event: any) => {
         console.error('❌ Speech recognition error:', event.error);
         setIsListening(false);
+        setIsRetrying(false);
+        
+        let errorMessage;
+        switch (event.error) {
+          case 'not-allowed':
+            setMicrophonePermission('denied');
+            errorMessage = 'Microphone access denied. Please click the microphone icon in your browser\'s address bar and allow access.';
+            break;
+          case 'no-speech':
+            errorMessage = 'No speech detected. Please speak clearly and try again.';
+            break;
+          case 'network':
+            // Try to retry network errors automatically
+            if (networkRetryCount < 3) {
+              setIsRetrying(true);
+              const retryDelay = Math.pow(2, networkRetryCount) * 1000; // Exponential backoff
+              console.log(`🔄 Network error, retrying in ${retryDelay}ms (attempt ${networkRetryCount + 1}/3)`);
+              
+              setTimeout(() => {
+                setNetworkRetryCount(prev => prev + 1);
+                setIsRetrying(false);
+                if (recognition) {
+                  try {
+                    recognition.start();
+                  } catch (e) {
+                    console.error('❌ Retry failed:', e);
+                    setError('Network connection unstable. Please check your internet and try again.');
+                  }
+                }
+              }, retryDelay);
+              
+              errorMessage = `Network error (retrying in ${Math.round(retryDelay/1000)}s...)`;
+            } else {
+              setNetworkRetryCount(0);
+              errorMessage = 'Network connection failed after 3 attempts. Please check your internet connection or try typing your question.';
+            }
+            break;
+          case 'service-not-allowed':
+            errorMessage = 'Speech recognition service blocked. Please check your browser settings or try a different browser.';
+            break;
+          case 'aborted':
+            // User stopped recording, don't show error
+            return;
+          default:
+            errorMessage = `Speech recognition error: ${event.error}. Please try again.`;
+        }
+          
+        setError(errorMessage);
+        
+        // Auto-clear non-critical errors (except permission and persistent network issues)
+        if (event.error !== 'not-allowed' && networkRetryCount === 0) {
+          setTimeout(() => setError(null), 8000);
+        }
       };
 
       setRecognition(speechRecognition);
+      console.log('🎙️ Speech recognition initialized successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to initialize microphone:', error);
+      setMicrophonePermission('denied');
+      setError('Microphone access denied. Please allow microphone access and refresh the page.');
     }
-  }, [transcript]);
+  };
 
   // Auto-scroll to latest question
   useEffect(() => {
@@ -165,30 +262,29 @@ export default function QuestionsPage() {
     setIsLoading(true);
     setError(null);
     const questionId = `q-${Date.now()}`;
-    const startTime = Date.now();
 
-    console.log('🤔 Question submitted:', `"${questionText}"`, transcript ? '(voice)' : '(text)');
+    console.log('🤔 Question submitted:', `"${questionText}"`);
 
     try {
       console.log('📡 Sending chat message to API...');
 
-             const requestPayload = {
-         message: questionText,
-         sessionId,
-         options: {
-           generateAudio: true,
-           maxTokens: 500,
-           temperature: 0.7
-         }
-       };
+      const requestPayload = {
+        message: questionText,
+        sessionId,
+        options: {
+          generateAudio: true,
+          maxTokens: 500,
+          temperature: 0.7
+        }
+      };
 
-       const response = await fetch(`${API_BASE}/api/conversation/chat`, {
-         method: 'POST',
-         headers: {
-           'Content-Type': 'application/json',
-         },
-         body: JSON.stringify(requestPayload),
-       });
+      const response = await fetch(`${API_BASE}/api/conversation/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestPayload),
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -213,6 +309,7 @@ export default function QuestionsPage() {
       setQuestions(prev => [...prev, newQuestion]);
       setCurrentQuestion('');
       setTranscript('');
+      interimTranscriptRef.current = '';
 
       // Update session info
       if (sessionInfo) {
@@ -222,10 +319,6 @@ export default function QuestionsPage() {
           totalQuestions: prev.totalQuestions + 1
         } : null);
       }
-
-      // Log conversation context for debugging
-      const updatedConversationHistory = [...questions, newQuestion];
-      console.log('💬 Conversation context:', updatedConversationHistory.length, 'exchanges,', slides?.length || 0, 'slides available');
 
       // Auto-play audio if available
       if (result.audioUrl && audioRef.current) {
@@ -242,18 +335,46 @@ export default function QuestionsPage() {
     }
   };
 
-  const toggleMicrophone = () => {
-    if (!recognition) {
-      setError('Speech recognition not supported in this browser');
-      return;
-    }
-
+  const toggleMicrophone = async () => {
+    console.log('🎤 Microphone toggle clicked, current state:', { isListening, microphonePermission });
+    
     if (isListening) {
-      recognition.stop();
+      console.log('🛑 Stopping speech recognition');
+      if (recognition) {
+        recognition.stop();
+      }
+      setIsListening(false);
     } else {
+      // Check microphone permission first
+      if (microphonePermission === 'denied') {
+        setError('Microphone access is denied. Please click the microphone icon in your browser\'s address bar and allow access, then refresh the page.');
+        return;
+      }
+
+      if (microphonePermission === 'unknown') {
+        setError('Microphone permission not initialized. Please refresh the page.');
+        return;
+      }
+
+      if (!recognition) {
+        setError('Speech recognition not available. Please refresh the page or try a different browser.');
+        return;
+      }
+
+      console.log('▶️ Starting speech recognition');
       setCurrentQuestion('');
       setTranscript('');
-      recognition.start();
+      interimTranscriptRef.current = '';
+      setError(null);
+      setNetworkRetryCount(0); // Reset retry count for new session
+      
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error('❌ Failed to start speech recognition:', error);
+        setError('Failed to start speech recognition. Please try again.');
+        setIsListening(false);
+      }
     }
   };
 
@@ -346,11 +467,33 @@ export default function QuestionsPage() {
         </Button>
       </div>
 
+      {/* Microphone Status */}
+      {microphonePermission !== 'granted' && (
+        <Card className="mb-6 border-yellow-200 bg-yellow-50">
+          <CardContent className="py-4">
+            <p className="text-yellow-700">
+              🎤 Microphone {microphonePermission === 'denied' ? 'access denied' : 'not yet configured'}. 
+              {microphonePermission === 'denied' && ' Click the microphone icon in your browser\'s address bar to allow access.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Error Display */}
       {error && (
         <Card className="mb-6 border-red-200 bg-red-50">
           <CardContent className="py-4">
             <p className="text-red-600">❌ {error}</p>
+            {error.includes('Microphone access') && (
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="mt-2"
+                onClick={() => window.location.reload()}
+              >
+                Refresh Page
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -484,6 +627,13 @@ export default function QuestionsPage() {
               variant={isListening ? "destructive" : "outline"}
               size="icon"
               disabled={isLoading}
+              title={
+                microphonePermission === 'denied' 
+                  ? 'Microphone access denied - check browser settings'
+                  : isListening 
+                    ? 'Stop recording' 
+                    : 'Start voice input'
+              }
             >
               {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </Button>
@@ -498,8 +648,29 @@ export default function QuestionsPage() {
           </div>
           
           {isListening && (
-            <p className="text-sm text-blue-600 mt-2">
-              🎤 Listening... (Transcript: "{transcript}")
+            <div className="mt-2 p-2 bg-blue-50 rounded-md">
+              <p className="text-sm text-blue-600 font-medium">
+                🎤 Listening... Speak now!
+              </p>
+              {transcript && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Current: "{transcript}"
+                </p>
+              )}
+            </div>
+          )}
+          
+          {isRetrying && (
+            <div className="mt-2 p-2 bg-yellow-50 rounded-md">
+              <p className="text-sm text-yellow-600 font-medium">
+                🔄 Network issue detected, retrying speech recognition...
+              </p>
+            </div>
+          )}
+          
+          {microphonePermission === 'granted' && !recognition && (
+            <p className="text-sm text-gray-500 mt-2">
+              Speech recognition is being initialized...
             </p>
           )}
         </CardContent>
@@ -513,4 +684,4 @@ export default function QuestionsPage() {
       />
     </div>
   );
-} 
+}
