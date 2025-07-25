@@ -221,6 +221,11 @@ npm run dev  # Check browser console
 4. Push to branch: `git push origin feature-name`
 5. Submit a Pull Request
 
+## DEMO
+
+[Watch the demo video directly](https://www.loom.com/share/29af8d328a9a4277bf04a24781a6f3e8?sid=cfda3162-914e-4641-ae34-448d5c247f94)
+
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
